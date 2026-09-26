@@ -1,0 +1,640 @@
+﻿O PARADOXO DO ESTAGIÁRIO
+Game Design Document Completo
+Game Jam CIMATEC 2026.2 — Tema: Efeito Borboleta
+"Pequenas Ações, Grandes Consequências"
+─────────────────────────────────────────────────────────
+DEADLINE: 28/09/2026 — 23h59 | SUBMISSÃO: itch.io
+─────────────────────────────────────────────────────────
+________________
+
+
+1. VISÃO GERAL DO PROJETO
+1.1 Resumo Executivo
+"O Paradoxo do Estagiário" é um jogo sandbox narrativo 2D em pixel art moderno onde o jogador assume o papel de um estagiário de uma agência interdimensional. Sua missão: derrubar um Rei tirano sem usar violência direta. A única ferramenta disponível é manipular objetos físicos do cenário e plantar narrativas falsas (boatos, evidências forjadas) para que os próprios NPCs causem o colapso social da aldeia.
+A Inteligência Artificial integrada ao backend interpreta cada ação do jogador e gera um roteiro de consequências em tempo real, que o motor gráfico executa com animações fluidas. O resultado é a ilusão de que qualquer ação é possível, porque qualquer ação pode ser interpretada e animada a partir de blocos modulares já existentes.
+1.2 Pilares do Projeto
+• EFEITO BORBOLETA: cada micro-ação do jogador desencadeia consequências progressivamente maiores e imprevisíveis.
+• LIBERDADE PERCEBIDA: o jogador sente que pode fazer qualquer coisa, porque a IA interpreta livremente dentro de um vocabulário visual finito.
+• IA COMO MESTRE: a Inteligência Artificial não é um NPC — é o Diretor de Cena que rege toda a simulação.
+• ANIMAÇÃO COMO NARRATIVA: tudo que a IA decide acontece visualmente na tela, com animação fluida e feedback sonoro.
+• PIXEL ART MODERNO: estética high-bit, rica em detalhes, fluida, com profundidade e iluminação dinâmica.
+1.3 Gênero, Plataforma e Engine
+• Gênero: Puzzle Narrativo / Sandbox Social / Simulação com IA
+• Plataforma: PC (Windows, Linux, Mac)
+• Engine recomendada: Godot 4.x (ideal para pixel art 2D, grátis, open-source)
+• Backend: Python + FastAPI
+________________
+2. ARTE E ESTÉTICA VISUAL
+2.1 Estilo Pixel Art Moderno (High-Bit)
+O jogo NÃO é 8-bit estilo NES ou Super Mario. É pixel art "High-Bit" ou "Modern Pixel Art": sprites com mais pixels, mais cores por paleta, shaders de iluminação, profundidade de campo e animações fluidas de muitos frames.
+Referências de Estilo Visual
+• Octopath Traveler (profundidade, iluminação, cores ricas)
+• Dead Cells (fluidez de animação, detalhe moderno)
+• Eastward (personagens expressivos, cenários densos)
+• Terraria (animações de ambiente, partículas)
+• Stardew Valley (NPCs com rotinas, ambiente vivo)
+A chave é: os sprites têm PELO MENOS 32x32 pixels para objetos pequenos, 48x64 para personagens, e o cenário usa tiles de 16x16 ou 32x32 com camadas de detalhe (parallax, foreground, background).
+2.2 Paleta de Cores — Aldeia Medieval
+Paleta Primária (Cenário)
+• Grama: verde musgo (#5A8A3C), verde claro (#7CB86A), amarelo-seco (#A8A050)
+• Terra: marrom escuro (#6B4423), marrom médio (#8C6239), bege (#C4A882)
+• Pedras: cinza azulado (#7A8A9A), cinza escuro (#525C6A), cinza claro (#A8B0B8)
+• Madeira: marrom caramelo (#A0622A), marrom escuro (#6B3A18)
+• Água: azul escuro (#1A4A7A), azul médio (#2A6AB0), reflexo branco (#C8E8FF)
+• Céu: gradiente de índigo (#1A1A40) para azul profundo (#2A3A6A) à noite; gradiente laranja (#FF9640) para amarelo (#FFD080) ao amanhecer
+Paleta de NPCs
+• Pele: tons humanos variados, mínimo 3 tons de sombra por cor de pele
+• Roupas: cores saturadas para personagens principais, neutras para figurantes
+• Cabelos: preto, castanho, ruivo, grisalho — cada NPC fixo
+2.3 Resolução e Escala
+• Resolução base do jogo: 1280x720 (upscaled para 1920x1080 na tela)
+• Tile size: 16x16 pixels
+• Personagens: sprites de 32x48 pixels
+• Viewport: mostra aproximadamente 20x14 tiles por vez
+• Zoom: 2x (ou seja, cada pixel = 2 pixels reais na tela 720p)
+• Mapa total: 80x60 tiles (1280x960 pixels de conteúdo)
+________________
+
+
+3. SISTEMA DE ANIMAÇÃO COMPLETO
+3.1 Filosofia de Animação
+TODOS os elementos visuais do jogo estão animados. Não existem sprites estáticos no mapa, exceto paredes e estruturas fixas (e mesmo essas têm micro-animações — a chama de uma tocha, a bandeira tremulando). A regra é: se o vento tocar, mexe. Se for vivo, respira. Se cair, cai com física.
+3.2 Personagem Principal (O Estagiário Invisível)
+O Estagiário é visualmente representado apenas por um cursor especial — uma espécie de sombra etérea translúcida que pulsa levemente. Ele NÃO tem sprite de personagem, pois é "invisível" para os NPCs. Isso simplifica o desenvolvimento e reforça a narrativa.
+Animações do Cursor/Estagiário
+• Idle: pulsa suavemente (escala de 0.95 a 1.0) a cada 1.2 segundos
+• Hover sobre NPC: cursor muda para ícone de "olho", brilha dourado
+• Hover sobre objeto interativo: cursor muda para mão, objeto brilha levemente
+• Segurando objeto: objeto flutua acima do cursor com trail de pixels brilhantes
+• Drop (soltar objeto): objeto cai com arc suave, partícula de "plop" ao pousar
+• Terminal aberto: cursor some, foco vai para o terminal de texto
+3.3 NPCs — Sistema de Animação Completo
+Cada NPC tem um conjunto completo de animações sprite-based. As roupas são camadas SEPARADAS sobre o corpo base, com cloth simulation simplificada (oscilação de pixels das bordas).
+Animações Base (Compartilhadas por TODOS os NPCs)
+Cada animação abaixo existe em 8 direções: cima, baixo, esquerda, direita, e as 4 diagonais.
+• IDLE (8 dir): personagem parado, respirando (tronco sobe/desce 1px a cada 1.5s). Cabelos e roupas oscilem levemente.
+• WALK (8 dir): caminhada normal, ~8 frames por ciclo. Braços balançam opostos às pernas. Saias/capas se movem no rastro.
+• RUN (8 dir): corrida, ~6 frames (mais rápido). Corpo levemente inclinado para frente. Efeito de poeira nos pés.
+• REACT_FEAR: NPC recua 1 tile, braços levantam, expressão assustada. Duração: 0.8s.
+• REACT_ANGER: NPC avança 0.5 tile, punho levantado, rosto vermelho (paleta muda). Duração: 0.6s.
+• TALK (4 dir): boca se mexe em loop, balão de fala aparece acima.
+• WORK_GENERIC: animação de "fazer algo com as mãos". Personalizada por NPC (ver abaixo).
+• PICK_UP: agacha, pega item. Duração: 0.5s.
+• DROP_ITEM: larga item no chão. Duração: 0.3s.
+• FALL_DOWN: cai de lado. Fumaça/estrelinhas. Duração: 1.0s. Depois, UNCONSCIOUS (deitado).
+• GET_UP: se levanta lentamente. Duração: 0.8s.
+• POINT: aponta na direção de algo. Usado ao denunciar algo.
+• SHRUG: dá de ombros (não sabe/não acredita no boato).
+• CRY: chora, ombros baixos, mãozinha nos olhos. Partículas de lágrima.
+• LAUGH: ri, corpo inclina para frente levemente.
+• PUSH_OBJECT: empurra caixa/barril. Esforço visível (tremor leve no sprite).
+Animações Únicas por NPC
+O Padeiro:
+◦ WORK_BREAD: amassa pão em loop (4 frames, mesa à frente)
+◦ HOLD_LOAF: segura um pão com ambas as mãos
+◦ THROW_BREAD: joga um pão (ação hostil)
+O Ferreiro:
+◦ WORK_ANVIL: martela bigorna em loop (faíscas como partícula)
+◦ HOLD_SWORD: segura espada. Brilho na lâmina.
+◦ FORGE_RAISE: levanta martelo bem alto (2x tamanho normal da animação)
+O Guarda:
+◦ PATROL_WALK: caminhada firme, lança na mão
+◦ ALERT_STANCE: para, ergue lança, expressão alerta
+◦ ARREST: caminha em direção a NPC, empurra com animação PUSH
+◦ BLOW_HORN: sopra chifre, onda de som como partícula circular
+A Sacerdotisa:
+◦ PRAY: ajoelha, mãos juntas, brilho dourado suave ao redor dela
+◦ BLESS: faz gesto de benção, partícula de luz dourada
+◦ CONSULT_BOOK: olha para livro grande
+O Mercador:
+◦ COUNT_COINS: conta moedas, som de tintinar
+◦ OPEN_STALL: abre tenda (sprite de tenda se expande)
+◦ WALK_TRAVEL: caminhada mais animada, com bolsa nas costas balançando
+A Órfã:
+◦ PLAY: corre em círculos, pula, braços abertos
+◦ HIDE: se encolhe, abraça joelhos
+◦ CRY_INTENSE: chora deitada no chão (mais dramático que CRY padrão)
+O Rei:
+◦ THRONE_SIT: sentado no trono, perna cruzada, corpo imponente
+◦ DECREE: levanta mão e scroll, proclamação
+◦ ANGRY_SLAM: bate punho na mesa
+◦ FLEE: corre em pânico, coroa caindo levemente
+3.4 Animações de Ambiente e Clima
+Vegetação
+• Árvore (idle): tronco estático, copa oscila suavemente a cada 2-3s (wind cycle)
+• Árvore (wind=forte): copa oscila mais, algumas folhas soltas se desprendem como partícula
+• Folha caindo: sprite de folha segue trajetória arc curva, rotação lenta, cai em 2-4s
+• Grama: tiles de grama têm animação sutil de ondulação em ciclo de 3s
+• Arbusto: oscila como árvore pequena, mas mais rápido
+• Flor: pétalas oscilam levemente; se pisada (NPC passa por cima), animação de esmago
+Água
+• Lago (surface): shader de ondulação senoidal, loop de 4s
+• Lago (shore): espuma branca pulsa nas bordas, 2s de ciclo
+• Reflexo: sprites de árvores e céu refletidos invertidos com distorção ondulante
+• Peixe: sprite simples de peixe, nada em loop aleatório, às vezes salta
+• Pedra no lago: ao cair, ripple (círculos se expandindo) como partícula, dura 1.5s
+• Envenenamento da água: gradualmente, a cor da água muda de azul para esverdeado (over 10s). Peixes param de nadar.
+Estruturas e Objetos
+• Chama de tocha: sprite de fogo com 6 frames, partículas de fagulha ocasionais
+• Bandeira do Rei: acena no topo do castelo, 4 frames de loop
+• Porta do castelo: animação de abertura/fechamento (3 frames)
+• Janela com luz: quando noite, janela tem sprite de candeia, brilho suave
+• Fumaça da chaminé: partículas de fumaça cinza saindo da chaminé, sobem e dissipam
+• Poço: balde se move ao interagir, corda se move (4 frames)
+• Barril: ao ser empurrado, rola com rotação de sprite; ao cair, partícula de impacto
+• Carta/Scroll: ao ser deixado, animação de "flutuar e pousar"
+Clima e Tempo
+• Ciclo dia/noite: a iluminação global muda gradualmente. Manhã (quente/laranja), tarde (neutro), entardecer (dourado), noite (azul escuro com estrelas)
+• Vento: variável global. Afeta vegetação, roupas, partículas. Intensidade 0-3.
+• Chuva (se acionada pela IA): partículas de gota, sprites molhados (paleta escurecida), poças formando no chão
+• Fumaça de incêndio: partículas densas de fumaça preta/cinza subindo
+• Fogo: sprite de chamas em loop + partícula de faísca
+3.5 Efeitos de Partícula (Biblioteca Completa)
+Cada tipo de evento tem partículas específicas. A IA escolhe quais partículas ativar em seu roteiro JSON.
+• dust_small: 3-5 pixels de poeira, dura 0.5s (NPC anda rápido)
+• dust_large: nuvem de poeira, dura 1.5s (objeto pesado cai)
+• sparkle_gold: brilho dourado (objeto mágico ou sagrado)
+• sparkle_red: brilho vermelho/alaranjado (perigo, veneno, raiva)
+• blood_splash: pixels vermelhos (combate — deve ser discreto)
+• leaf_fall: 2-4 sprites de folha caindo (vento ou árvore agitada)
+• smoke_thin: fumaça fina (chaminé, apagando tocha)
+• smoke_thick: fumaça espessa (incêndio)
+• fire_sparks: faíscas laranja (ferreiro, fogueira)
+• water_ripple: círculos expandindo (algo caiu na água)
+• water_splash: spray de água (impacto forte)
+• poison_bubbles: bolhas verdes (veneno)
+• coins_scatter: sprites de moeda voando (saco rasgado, roubo)
+• tears: gotinhas azuis caindo (NPC chora)
+• stars_dizzy: estrelinhas em volta de NPC caído
+• exclamation: ponto de exclamação aparece acima de NPC surpreso
+• question: ponto de interrogação acima de NPC confuso
+• anger_symbol: símbolo de raiva (quadrinhesco) acima de NPC furioso
+• heart_break: coração partido acima de NPC traído
+• crowd_murmur: múltiplos "..." aparecendo acima de NPCs próximos (boato se espalhando)
+• instability_pulse: onda de energia saindo do epicentro do caos (reforço visual da barra aumentando)
+________________
+
+
+4. CONTROLES E CÂMERA
+4.1 Controles do Teclado
+• WASD ou Setas: não movem um personagem — movem a CÂMERA quando não há ação ativa. (O Estagiário é o cursor, não um personagem andando.)
+• ESC: pausa o jogo, abre menu de pausa
+• TAB: abre/fecha painel de status dos NPCs (lista rápida)
+• ENTER: confirma texto no terminal de narrativa
+• Z: desfaz último clique (antes de confirmar com ENTER)
+4.2 Controles do Mouse
+• CLICK ESQUERDO sobre objeto: seleciona / pega o objeto (se tiver PA disponível)
+• CLICK ESQUERDO sobre NPC: abre card de informações do NPC (Medo, Raiva, Lealdade, últimas memórias)
+• CLICK ESQUERDO sobre local (com objeto em mãos): solta o objeto no local — abre terminal de narrativa
+• CLICK DIREITO: cancela ação atual / solta objeto sem plantar narrativa
+• SCROLL: faz zoom in/out (range: 0.8x a 1.5x)
+• HOVER sobre objeto: brilho sutil + tooltip com nome do objeto
+• HOVER sobre NPC: card flutuante com nome e emoção atual (ícone)
+4.3 Sistema de Câmera
+• A câmera segue o CURSOR do mouse suavemente (lerp de 0.08)
+• Bordas do mapa: câmera para de se mover quando o cursor chega a 2 tiles da borda
+• Durante a SIMULAÇÃO: câmera passa a seguir o NPC mais ativo (o que está causando caos) automaticamente. O jogador pode clicar em qualquer lugar para travar a câmera manualmente.
+• Zoom automático: durante eventos climáticos (incêndio, motim), zoom out levemente para mostrar mais da cena
+• Screen shake: ativado pela IA quando eventos de impacto ocorrem (casa caindo, explosão, luta)
+________________
+
+
+5. TELAS DO JOGO
+5.1 Tela de Abertura / Loading
+Ao iniciar o jogo, uma tela preta com o logo piscando em pixel art (borboleta + relógio de areia + logo do jogo). Abaixo, uma barra de loading estilo "código sendo compilado" — letras e números passando rapidamente, depois barra de progresso.
+• Duração: 3-5 segundos
+• Trilha: som ambiente de vento e estática de rádio
+• Transição: fade para o Menu Principal
+5.2 Menu Principal
+Estética: A tela de fundo mostra a aldeia medieval em silhueta ao fundo, levemente animada (bandeiras se mexendo, lua se movendo). No centro, o título em pixel art grande. Abaixo, os botões em estilo de terminal retrô (caret piscando).
+Elementos Visuais
+• Background: aldeia em silhueta escura, céu noturno com estrelas (parallax, 2 camadas)
+• Título: "O PARADOXO DO ESTAGIÁRIO" em pixel art, brilho dourado pulsante
+• Subtítulo: "Agência Panóptico // ID do Operador: [nome do jogador]"
+• Efeito de escaneamento (scan line) sutil na tela toda
+Botões
+• [ INICIAR MISSÃO ] — inicia o jogo
+• [ ARQUIVOS ] — continuar jogo salvo (se houver)
+• [ CONFIGURAÇÕES ] — abre tela de configurações
+• [ CRÉDITOS ] — abre tela de créditos
+• [ SAIR ] — fechar o jogo
+Hover nos botões: som de "bip" e sublinhado aparece. Click: transição com flash branco rápido.
+5.3 Tela de Inserção de Nome
+Antes da primeira missão, uma tela de terminal de texto aparece:
+"AGÊNCIA PANÓPTICO // SISTEMA DE REGISTRO\nInsira seu ID de Operador:\n> _"
+O jogador digita seu nome (máx. 12 caracteres). Após confirmar: "ID registrado. Bem-vindo, [NOME]. Preparando portal dimensional..."
+5.4 Tela de Tutorial
+Ao iniciar a primeira missão, uma tela de tutorial se sobrepõe ao mapa (não separa o jogo). Setas e textos aparecem apontando para elementos reais da interface.
+• Passo 1: "OBSERVAÇÃO — Passe o mouse sobre os NPCs para ver seus atributos." [seta apontando para NPC]
+• Passo 2: "OBJETO — Clique em um objeto para pegá-lo." [seta apontando para maçã]
+• Passo 3: "MOVA — Leve o objeto para outro local." [seta de arraste]
+• Passo 4: "NARRATIVA — Digite o boato que conecta o objeto ao caos." [seta para o terminal]
+• Passo 5: "OBSERVE — A IA fará o resto. Você é apenas o catalisador."
+• Passo 6: "INSTABILIDADE — Quando a barra chegar a 100%, o Rei cai. Você tem 3 dias."
+Botão: [ENTENDIDO — INICIAR] fecha o tutorial e começa o Dia 1.
+5.5 Tela de Gameplay (HUD)
+O HUD é minimalista e discreto para não poluir a tela. Todos os elementos ficam nas bordas.
+Canto Superior Esquerdo
+• Relógio de turno: "DIA 1/3 — TARDE" com ícone de sol/lua
+• Pontos de Ação disponíveis: 3 ícones de borboleta (cada ação consumida apaga um ícone)
+Canto Superior Direito
+• Barra de "INSTABILIDADE SOCIAL": gradiente de verde (0%) a vermelho (100%). Com número percentual. Pulsa levemente quando aumenta.
+Canto Inferior Esquerdo
+• Card do NPC ao hover: nome, 4 barras de atributo (Medo, Raiva, Lealdade, Credulidade), lista das últimas 2 memórias dele em texto pequeno.
+Canto Inferior Direito (aparece ao segurar objeto)
+• "[OBJETO ATUAL]: [nome do objeto]"
+• "CLIQUE ESQUERDO para soltar"
+• "CLIQUE DIREITO para cancelar"
+Centro da Tela (aparece após soltar objeto)
+• Terminal de narrativa: caixa de texto translúcida estilo terminal, máx. 80 caracteres, com caret piscando e som de teclado mecânico ao digitar.
+5.6 Tela de Pausa
+Overlay escuro sobre o jogo (blur no fundo). Centro da tela, painel pixel art com:
+• [ CONTINUAR ]
+• [ REINICIAR DIA ]
+• [ CONFIGURAÇÕES ]
+• [ MENU PRINCIPAL ]
+• [ SAIR ]
+5.7 Tela de Game Over
+Ao falhar (3 dias passaram, Instabilidade < 100%):
+Animação: o Rei aparece no balcão do castelo, proclama algo. A aldeia volta à normalidade. Plano sobe para o céu, e uma voz (O Diretor): "Estagiário [NOME]. Você foi demitido. A anomalia persiste."
+Tela fade para preto. Texto em pixel art:
+"MISSÃO FRACASSADA\nA aldeia permanece estável.\nO Rei permanece no trono.\nVocê perdeu seu emprego.\n\n[TENTAR NOVAMENTE]    [MENU PRINCIPAL]"
+5.8 Tela de Vitória
+Ao vencer (Instabilidade = 100%):
+Cutscene animada: os NPCs convergem para o castelo. Bandeira do Rei é derrubada (animação). Castelo tem explosão de partículas douradas. Coroa cai. O Diretor no rádio: "Anomalia neutralizada. Portal abrindo..."
+Flash branco. Texto pixel art:
+"MISSÃO CONCLUÍDA\nO Rei foi deposto.\nEfeito Borboleta atingido.\nA linha do tempo está... protegida?"
+Após 3 segundos: a tela PISCA. Corte rápido para flashes das Fases 2 e 3 (teaser). Depois: botões [PRÓXIMA MISSÃO (EM BREVE)] e [MENU PRINCIPAL].
+5.9 Tela de Créditos
+Estilo de "log sendo deletado do servidor" — os créditos sobem lentamente sobre fundo preto. Código e caracteres aleatórios aparecem nas laterais, como se o sistema estivesse sendo apagado. Som ambiente de servidores.
+• DESENVOLVIDO POR: [lista da equipe com roles]
+• MOTOR IA: Claude 3.5 Sonnet (Anthropic)
+• ASSETS: [listar assets gratuitos usados com links]
+• AGRADECIMENTOS: CIMATEC, Game Jam 2026.2
+• ENGINE: Godot 4.x / Phaser 3
+5.10 Tela de Configurações
+Painel em pixel art com sliders e toggles:
+• VOLUME GERAL: slider 0-100%
+• MÚSICA: slider 0-100%
+• EFEITOS SONOROS: slider 0-100%
+• RESOLUÇÃO: dropdown (1280x720, 1920x1080, fullscreen)
+• VELOCIDADE DE SIMULAÇÃO: slider (0.5x / 1x / 2x) — controla a velocidade das animações da simulação
+• SUBTÍTULOS: toggle ON/OFF
+• MODO DALTÔNICO: toggle ON/OFF (muda paleta de instabilidade)
+________________
+
+
+6. MECÂNICAS DE GAMEPLAY DETALHADAS
+6.1 O Loop de Turno (Detalhado)
+O jogo funciona em turnos de "dias". Cada dia tem duas fases: AÇÃO e SIMULAÇÃO. O jogador alterna entre essas fases.
+FASE DE AÇÃO (Jogador no Controle)
+• Duração: sem limite de tempo real. O dia não avança enquanto o jogador não finalizar as ações.
+• O jogador tem 3 Pontos de Ação (PA) por dia.
+• Pode usar PA para: pegar objeto (1 PA), soltar objeto com narrativa (1 PA), ou observar NPC de perto (0 PA, apenas informação).
+• Ao gastar todos os 3 PA (ou ao clicar no botão "ENCERRAR DIA"): fase de Simulação começa.
+FASE DE SIMULAÇÃO (IA no Controle)
+• Duração: 60 a 120 segundos de animação em tempo real.
+• A IA processa todas as ações do turno e gera um roteiro de eventos.
+• O motor gráfico executa os eventos em sequência, com animações e sons.
+• O jogador apenas assiste — a câmera segue automaticamente o NPC mais ativo.
+• Ao final da simulação: contador de dia avança. Se Dia 3 terminar e Instabilidade < 100%: Game Over. Se Instabilidade >= 100%: Vitória.
+6.2 Sistema de Pontos de Ação
+3 PA por dia. Representados por 3 ícones de borboleta dourada no HUD. Cada PA gasto apaga uma borboleta.
+• Pegar objeto: -1 PA. O objeto flutua acima do cursor.
+• Soltar + Narrativa: -1 PA. Confirmar com ENTER finaliza a ação.
+• Soltar sem narrativa (clique direito): -1 PA. O objeto cai sem boato associado. A IA pode gerar consequências menores baseadas apenas no objeto.
+• Overflow: não é possível pegar dois objetos simultaneamente. O segundo clique em objeto cancela o primeiro (sem gastar PA).
+6.3 Sistema de Objetos e Drag-Drop
+Cada objeto no mapa tem:
+• ID único
+• Nome visível (tooltip ao hover)
+• Tags: [sagrado], [veneno], [real] (pertence ao rei), [comida], [arma], [escrito], [pesado], [pequeno]
+• Descrição da IA: 1-2 linhas sobre o que a IA sabe sobre este objeto
+A IA usa as TAGS do objeto para calcular consequências realistas. Um objeto com tag [veneno] não pode ser "inofensivo" na IA. Um objeto com tag [sagrado] gera reações extremas em NPCs religiosos.
+Lista de Objetos na Fase 1 (Aldeia Medieval)
+• Maçã vermelha [comida]
+• Maçã envenenada (oculta como maçã normal) [comida, veneno]
+• Pão [comida]
+• Chave dourada [real]
+• Anel com Brasão Real [real, pequeno]
+• Carta lacrada (vazia) [escrito]
+• Carta com incriminações (gerada pelo jogador ao dropar + escrever) [escrito]
+• Moeda com brasão real [real, pequeno]
+• Espada enferrujada [arma]
+• Adaga (pertence ao Rei) [arma, real]
+• Frasco de veneno [veneno, pequeno]
+• Toca azul (do cozinheiro, reconhecível) [pequeno]
+• Saco de farinha [comida, pesado]
+• Livro de ritos [sagrado, escrito]
+• Relíquia da Sacerdotisa [sagrado, pequeno]
+• Martelo do Ferreiro [arma, pesado]
+• Moeda falsa [pequeno] (parece moeda real)
+6.4 Terminal de Inserção de Narrativa
+O terminal é um dos elementos mais importantes do jogo. Quando o jogador solta um objeto, uma janela de texto estilo cyberpunk/terminal aparece na tela, com:
+• Header: "// INSERINDO NARRATIVA NA LINHA DO TEMPO //"
+• Subtexto: "O que os moradores saberão sobre este objeto aqui?"
+• Input: linha de texto com caret piscando, máx. 80 caracteres
+• Contador de caracteres restantes
+• [ENTER]: confirma e envia para a IA
+• [ESC]: cancela sem gastar o PA
+Enquanto o jogador digita, o som de teclado mecânico toca (um "clack" por caractere). Ao pressionar ENTER, um pulso de luz se expande da posição do objeto para todos os lados — representando a narrativa sendo "injetada" no mundo.
+Exemplos de Entradas Válidas
+• "O Rei mandou envenenar a água da aldeia"
+• "Esta adaga prova que o Ferreiro queria matar a Rainha"
+• "Este anel foi roubado do cofre sagrado da Sacerdotisa"
+• "O Guarda foi visto largando isto aqui"
+Regras de Validação (Backend)
+• A narrativa deve ter alguma conexão com o objeto ou sua localização. Se desconectada demais, a IA gera uma consequência de "ninguém acredita" (Instabilidade +2).
+• Narrativas ofensivas ou abusivas (detectadas por filtro de conteúdo) são recusadas com mensagem: "A Agência não autoriza este tipo de boato. Tente de novo."
+6.5 Barra de Instabilidade Social
+A principal métrica de progresso. Vai de 0 a 100. Começa em 5 (a aldeia nunca é 100% estável).
+• Cada evento bem-sucedido da IA adiciona delta_instability (definido no JSON da IA)
+• Valores típicos: boato fraco = +3 a +8. Evidência física = +10 a +20. Incidente grave = +25 a +40.
+• Estabilizadores: se a Sacerdotisa fizer um ritual de paz, -10. Se o Rei decretar toque de recolher, -5.
+• Ao chegar a 100%: animação de alarme na UI (vermelho pulsante), seguida da cutscene de vitória.
+• A barra é visual (gradiente verde → amarelo → laranja → vermelho) com pulsação que acelera conforme sobe.
+________________
+
+
+7. O MAPA DA ALDEIA (FASE 1)
+7.1 Layout Geral
+O mapa é uma aldeia medieval de tamanho médio, vista de cima em perspectiva isométrica leve (top-down com tiles que sugerem profundidade). O mapa tem 80x60 tiles.
+Divisão das zonas (de norte a sul):
+• NORTE: O Castelo (topo do mapa, 20x15 tiles)
+• NORDESTE: Floresta densa (não interativa no MVP, serve de borda)
+• CENTRO-NORTE: Praça Principal (10x10 tiles) — coração da vila
+• CENTRO-OESTE: Padaria e Residências
+• CENTRO-LESTE: Ferraria e Mercado
+• SUL: Lago e Área Rural
+• SUDOESTE: Casa da Sacerdotisa e Templo pequeno
+• BORDAS: Estrada (saída do mapa, não acessível)
+7.2 Zonas e Pontos de Interesse
+Castelo (Norte)
+• Sala do Trono: onde o Rei fica. Inacessível diretamente (guardas bloqueiam a entrada principal).
+• Portão: 2 guardas patrulham. Pode ser aberto por suborno (objeto) ou distração.
+• Muralha: decorativa, NPCs não escalam no MVP.
+• Pátio interno: visível ao jogador, o Rei aparece aqui às 14h todo dia (rotina fixa).
+Praça Principal
+• Fonte central: animação de água jorrando. NPCs passam aqui frequentemente. Ponto de encontro e propagação de boatos.
+• Poço: à esquerda da fonte. Pode ser envenenado (objeto de frasco).
+• Poste de decretos: o Guarda posta papéis aqui às 8h. Jogador pode substituir um papel (objeto de carta).
+• Mercado temporário: o Mercador monta sua banca às 9h, fecha às 17h.
+Padaria
+• Interior acessível ao cursor. Mesa de trabalho, forno, vitrine de pães.
+• Objetos: pão, farinha, frasco (ingrediente), toca azul do padeiro.
+• Rotina: João da Padaria trabalha das 7h às 18h.
+Ferraria
+• Bigorna com faíscas (animação loop), forja, barril de água, martelo.
+• Objetos: martelo, espada em construção, carvão.
+• Rotina: Ferreiro trabalha das 6h às 20h.
+Templo
+• Pequeno templo no sudoeste. Interior com altar, velas, relíquia sagrada.
+• Rotina: Sacerdotisa reza das 6h às 9h e das 18h às 21h. Fica no templo nos outros horários.
+Lago
+• Sul do mapa. Peixes nadando em loop. Pode ser envenenado.
+• Objetos na borda: cana de pesca, balde, pedra.
+• Efeito especial: se envenenado, a cor da água muda ao longo de 1 turno, peixes param de nadar e morrem (sprite de peixe de barriga para cima).
+7.3 Objetos Interativos no Mapa
+Além dos objetos carregáveis (seção 6.3), o mapa tem objetos FIXOS que reagem a ações da IA:
+• Tocha da praça: pode ser apagada (partícula de fumaça, área fica mais escura)
+• Sinal de anúncio: pode ter papel substituído
+• Poço: pode receber objetos jogados dentro
+• Forno da padaria: pode receber objetos (colocados dentro — a IA decide o que acontece)
+• Cofre da Sacerdotisa: objeto pequeno pode ser colocado dentro ou retirado (se o cofre estiver aberto)
+________________
+
+
+8. OS NPCs — PERFIS COMPLETOS
+8.1 O Rei (Alvo Principal)
+Nome: Aldemar I
+Sprite: imponente, manto roxo, coroa dourada, 40x60px
+Rotina: 6h acorda, 7h café no trono, 8h decreta (poste da praça), 10h reunião com guarda, 14h caminha no pátio, 16h treino de espada, 19h jantar, 21h dorme
+Atributos: Medo: 15 | Raiva: 60 | Lealdade (consigo mesmo): 100 | Credulidade: 20 (difícil de enganar diretamente)
+Papel: Aldemar NÃO é o alvo de persuasão — é o resultado do caos. Ele reage quando a instabilidade chega a 80%+ e o Guarda o informa. Acima de 95%, ele tenta fugir.
+Interação especial: ao tentar plantar evidência no próprio castelo, a IA dá +15 de Instabilidade mas -1 PA como "risco alto".
+8.2 O Padeiro (João)
+Nome: João da Padaria
+Sprite: barrigudo, avental branco sujo, chapéu azul, 32x48px
+Rotina: 6h acorda, 7h-18h trabalha, 12h come, 18h fecha, 19h visita vizinhos, 20h dorme
+Atributos: Medo: 30 | Raiva: 20 | Lealdade ao Rei: 40 | Credulidade: 75
+Personalidade: Fofoqueiro natural. Qualquer coisa interessante que ouve, propaga para o próximo NPC que encontra. Multiplica boatos com "detalhes extras" (a IA adiciona exagero).
+Reações chave: boato sobre o Rei roubando → Raiva +30, conta para todos. Evidência física na padaria → 95% de acreditar. Se Medo > 70, fecha a padaria e para de falar.
+8.3 O Ferreiro (Gordo)
+Nome: Gordo Marten (apelido local)
+Sprite: musculoso, cabelo curto, avental de couro, 36x50px
+Rotina: 6h acorda, 6h30-20h trabalha na bigorna, 12h pausa rápida, 20h taverna (não implementada no MVP: simplesmente desaparece do mapa)
+Atributos: Medo: 15 | Raiva: 55 | Lealdade ao Rei: 65 | Credulidade: 40
+Personalidade: Cético mas explosivo. Não acredita fácil, mas quando acredita, age violentamente. Pode ser a faísca de um confronto físico.
+Reação chave: evidência física de traição → Raiva +50. Pode iniciar confronto com Guarda diretamente.
+8.4 O Guarda (Bram)
+Nome: Bram, Capitão da Guarda Local
+Sprite: armadura de couro, elmo, lança, 34x50px
+Rotina: 6h-22h em patrulha (rota: portão do castelo → praça → poço → volta). 22h-6h: descansa no quartel (não visível).
+Atributos: Medo: 10 | Raiva: 30 | Lealdade ao Rei: 95 | Credulidade: 35
+Personalidade: Altamente leal, mas lento de raciocínio. Segue ordens. Se apresentado com evidência física clara, age imediatamente. Pode ser o "braço" que derruba o próprio Rei se enganado corretamente.
+Reação especial: se Instabilidade > 80%, Bram vai ao Rei e reporta. O Rei pode ordenar uma caçada ao "traidor", aumentando o caos.
+8.5 A Sacerdotisa (Mira)
+Nome: Mira, Guardiã do Templo
+Sprite: veste branca longa, cabelo preso, símbolo de lua no pescoço, 30x52px
+Rotina: 5h acorda, 6h-9h reza, 9h-17h aconselha moradores (no templo), 18h-21h reza, 21h dorme
+Atributos: Medo: 25 | Raiva: 10 | Lealdade ao Rei: 50 | Credulidade: 55 (para coisas sagradas: 90)
+Personalidade: Calmante. Se Mira discursa na praça, reduz Instabilidade em -10. É uma ameaça ao plano do jogador — deve ser neutralizada primeiro se quiser acelerar o caos. Objetos com tag [sagrado] têm impacto enorme nela.
+Reação especial: se a relíquia sagrada desaparecer, Mira entra em colapso emocional — Medo +60 — e acusa qualquer um presente no templo recentemente.
+8.6 O Mercador (Valdo)
+Nome: Valdo, o Andarilho
+Sprite: chapéu largo, bolsa nas costas, roupa de viagem, 32x48px
+Rotina: entra no mapa às 8h (sul), monta banca na praça 9h-17h, sai às 18h (norte). Presença só durante o Dia 1 e Dia 2.
+Atributos: Medo: 20 | Raiva: 15 | Lealdade ao Rei: 10 | Credulidade: 80
+Personalidade: Altamente crédulo e adora espalhar histórias. Funciona como "amplificador" de boatos — o que o Mercador ouve, ele conta em TODOS os NPCs que cruzar.
+Reação especial: se o jogador plantar um boato no Mercador (via evidência + narrativa), o efeito se propaga para TODOS os NPCs no dia seguinte (+15% de propagação).
+8.7 A Órfã (Lila)
+Nome: Lila
+Sprite: pequena, 24x36px, vestido rasgado, cabelo bagunçado, expressiva
+Rotina: vaga pelo mapa, sem rotina fixa. Aparece em locais aleatórios 3x por dia.
+Atributos: Medo: 50 | Raiva: 5 | Lealdade ao Rei: 5 | Credulidade: 95
+Personalidade: Extremamente emocional e influenciável. Ela sozinha não causa muito, mas ao ver qualquer coisa assustadora, começa a gritar e correr — criando pânico visual nos NPCs ao redor (aumenta Medo de todos em raio de 5 tiles em +10).
+Utilidade estratégica: o jogador pode plantar algo onde Lila vai passar, calculando que ela vai reagir de forma exagerada e gerar pânico social em cadeia.
+________________
+
+
+9. SISTEMA DE IA E BACKEND
+9.1 Arquitetura Técnica
+O backend é a espinha dorsal do jogo. Toda a "magia" do Efeito Borboleta acontece aqui.
+Stack
+• Linguagem: Python 3.11+
+• Framework: FastAPI (async, alta performance)
+• LLM: Claude 3.5 Sonnet via API Anthropic
+• Validação JSON: Pydantic (schema stricto) + jsonschema
+• Cache: arquivo JSON local (cache de roteiros offline)
+• Comunicação com frontend: HTTP REST (JSON)
+Endpoints Principais
+• POST /simulate — ação principal. Recebe ação do jogador, retorna roteiro de eventos.
+• GET /world_state — retorna estado atual da aldeia (NPCs, instabilidade, dia).
+• GET /npc/{id} — retorna perfil completo do NPC.
+• POST /end_turn — sinaliza fim do turno, avança o dia.
+9.2 O Prompt do Diretor de Cena
+Este é o prompt do sistema enviado ao LLM a cada simulação. É o coração do jogo.
+SYSTEM PROMPT (enviado uma vez por sessão):
+"Você é o Diretor de Cena do jogo 'O Paradoxo do Estagiário'. Seu papel é receber as ações de um jogador invisível que manipula objetos e planta boatos, e gerar as consequências de forma que respeitem: (1) Leis básicas de física e biologia. (2) Lógica de comportamento humano medieval. (3) As personalidades e atributos de cada NPC. As consequências devem ser plausíveis mas progressivamente extremas — a borboleta que bate as asas pode causar o furacão, mas não instantaneamente. Sempre retorne SOMENTE JSON válido, sem explicações, sem markdown."
+USER PROMPT (enviado a cada ação):
+"Ação do jogador: {objeto} foi deixado em {localização} com narrativa: '{narrativa}'.\nEstado atual do mundo: {world_state_json}\nMemórias recentes dos NPCs: {npc_memories_json}\nDia: {dia}/3\nInstabilidade atual: {instability}%\n\nGere um roteiro de eventos JSON com exatamente este formato:\n{\"events\": [{\"t\": segundos_desde_inicio, \"npc_id\": \"id_do_npc\", \"action\": \"token_de_acao\", \"target\": \"id_alvo_opcional\", \"dialogue\": \"fala_opcional\", \"particles\": [\"lista_de_particulas\"], \"sound\": \"id_de_som\"}], \"instability_delta\": numero, \"world_changes\": {\"chave\": \"novo_valor\"}}\n\nUse apenas os tokens de ação definidos no vocabulário. Máximo 12 eventos por roteiro."
+9.3 Fluxo de uma Requisição Completa
+• 1. Jogador: pega "anel real" (1 PA). Carrega até a casa do ferreiro (1 PA). Solta. Digita: "O Rei trocou o anel do ferreiro por uma imitação barata para humilhá-lo." (1 PA). Enter.
+• 2. Frontend: envia POST /simulate com o payload completo (ação + estado do mundo + memórias dos NPCs).
+• 3. Backend: constrói o prompt dinâmico, envia ao LLM.
+• 4. LLM: processa e retorna JSON com os eventos.
+• 5. Backend: valida o JSON com Pydantic. Se inválido: retorna evento de fallback genérico.
+• 6. Frontend: recebe o roteiro. Inicia simulação visual.
+• 7. SimulationPlayer: a cada frame, verifica se algum evento deve ser disparado (t <= tempo_atual).
+• 8. Evento disparado: NPC correspondente recebe instrução de ação. Pathfinding calcula rota. Animação toca.
+• 9. Ao fim de todos os eventos: barra de Instabilidade atualiza com delta_instability. Turno encerra.
+9.4 Vocabulário de Ações (Tokens Visuais)
+A IA só pode usar tokens desta lista. Tokens desconhecidos são ignorados pelo motor.
+• walk_to [target_location]: NPC caminha até a localização.
+• run_to [target_location]: NPC corre (animação de run) até a localização.
+• talk_to [npc_id]: NPC aborda outro NPC, balões de diálogo.
+• shout [text]: NPC grita na área. NPCs no raio de 6 tiles "ouvem" e reagem.
+• pick_up [object_id]: NPC pega objeto do chão.
+• drop [object_id]: NPC larga objeto.
+• throw [object_id] [target]: NPC arremessa objeto.
+• attack [npc_id]: NPC tenta agredir outro (pode ser bloqueado dependendo de atributos).
+• flee [direction]: NPC foge em direção especificada.
+• fall_down: NPC cai (envenenado, espancado, assustado demais).
+• change_state [object_id] [state_0..3]: muda o sprite de uma estrutura (ex: casa de intacta para destruída).
+• emit_particles [particle_id] [location]: emite partícula em ponto do mapa.
+• play_sound [sound_id]: reproduz som.
+• screen_shake [intensity_0..3]: treme a câmera.
+• change_water_color [color_hex]: muda a cor da água do lago.
+• change_time [time_string]: avança o relógio in-game.
+• spawn_crowd_reaction [location] [radius]: NPCs no raio reagem com partícula de "crowd_murmur".
+________________
+
+
+10. NARRATIVA E HISTÓRIA PRINCIPAL
+10.1 A Agência Panóptico
+A Agência Panóptico se apresenta como uma organização interdimensional cujo propósito é proteger a "Linha do Tempo Dourada" — a sequência de eventos que leva ao melhor futuro possível para a humanidade. Ela emprega operadores que viajam no tempo/espaço para "neutralizar anomalias": pessoas cujas ações causariam desvios perigosos.
+O Diretor é a IA central da Agência — uma voz no ouvido do jogador, sem face, sem corpo. Ele dá as missões, avalia o desempenho, e no final... é o verdadeiro antagonista.
+10.2 Briefing Inicial (Cutscene de Abertura)
+Tela preta. Estática de rádio. Uma voz processada eletrônica fala:
+"Operador [NOME]. Primeiro dia na Agência Panóptico. Seu briefing: uma aldeia medieval. Coordenadas: 14.7-F, Linha Alfa-3. Uma anomalia. O Rei Aldemar I. Projeção: se este rei permanecer no trono por mais 30 dias, ele iniciará uma guerra que destruirá a região. Sua missão: remove-lo do trono sem intervenção direta. Sem violência. Sem comunicação com os habitantes. Apenas... o ambiente. Em 3 dias. Boa sorte, Estagiário."
+Fade in para o mapa. Tutorial começa.
+10.3 Desenvolvimento nos 3 Dias
+A narrativa evolui conforme a Instabilidade sobe:
+• 0-30%: A aldeia está estável. Pequenos boatos circulam. Alguns NPCs parecem inquietos mas nada mais.
+• 30-60%: O Guarda começa a fazer mais rondas. O Rei aparece no balcão do castelo com expressão preocupada. A Sacerdotisa começa a rezar mais.
+• 60-85%: Confrontos menores acontecem. Alguns NPCs se reúnem em grupos. A iluminação do mapa muda (mais sombria).
+• 85-99%: O Rei sai para a praça com o Guarda, tentando acalmar a população. Esse é o momento de risco — se o jogador não agir, a Instabilidade pode cair para 75%.
+• 100%: Revolta. Os NPCs convergem para o castelo. Cutscene de vitória.
+10.4 Cutscene de Vitória (Detalhada)
+Sequência animada em pixel art, cerca de 45 segundos:
+• Frame 1: Praça lotada de NPCs agitados (crowd murmur particles enchendo a tela)
+• Frame 2: Guarda é rodeado pelos moradores (não sabe o que fazer)
+• Frame 3: O Ferreiro lidera a marcha para o portão do castelo
+• Frame 4: Portão abre (animação). NPCs entram.
+• Frame 5: O Rei aparece na sacada, coroa tremendo, rodeado
+• Frame 6: Coroa cai no chão (animação de queda com partícula dourada)
+• Frame 7: Bandeira do Rei desce do castelo. A bandeira da aldeia sobe.
+• Fade out. Silêncio.
+A voz do Diretor: "Missão cumprida, Operador [NOME]. Anomalia neutralizada. Parabéns. A linha do tempo foi... protegida."
+Pausa. Então, com tom levemente diferente: "...Preparando seu próximo destino."
+10.5 O Plot Twist (Revelação — Cutscene Pós-Vitória)
+A tela pisca. Estática. Como se o sistema estivesse falhando. A voz do Diretor some.
+Uma voz DIFERENTE — mais humana, distante, como uma gravação — aparece:
+"Operador. Se você está ouvindo isso, é porque chegou ao fim da primeira missão. Mas preciso que saiba a verdade sobre a Agência Panóptico. O Rei Aldemar I... não era uma anomalia. Ele ia unificar esses reinos e iniciar a maior era de paz que esse mundo conheceria. A Agência o eliminou. E você foi a ferramenta."
+Flash de imagem: uma cidade próspera, feliz — o futuro que não existiu mais.
+"Há mais. A cientista que você vai neutralizar na Fase 2... ela vai libertar a humanidade da tirania corporativa. E a colônia em Marte, na Fase 3... a primeira aliança pacífica entre espécies. Todas as suas missões são assassinatos. A Agência não protege a linha do tempo. Ela a controla."
+A gravação para. O Diretor volta: "Conexão não autorizada encerrada. Operador, desconsidere os erros do sistema. Preparando próxima missão."
+10.6 Teaser das Fases 2 e 3
+Sequência de flashes rápidos (3-4 segundos cada):
+• Flash 1: Arranha-céus cyberpunk, chuva, código caindo, mulher cientista em laboratório holográfico. "Metrópole Global — 2142"
+• Flash 2: Superfície de Marte, domo de acrílico, alienígenas e humanos na mesma sala de reunião. "Colônia Ares-7 — 3050"
+• Flash 3: Uma sede da Agência Panóptico — servidores infinitos, portais dimensionais, o ícone do Diretor pulsando.
+• Flash 4: Texto na tela: "O efeito borboleta não acabou."
+Fade para créditos.
+________________
+
+
+11. ÁUDIO
+11.1 Trilha Sonora
+• Menu Principal: tema orquestral leve e misterioso, com piano e cordas, estilo "segredo antigo"
+• Dia 1 (pouca instabilidade): melodia simples de aldeia medieval, flauta e alaúde, ambiente tranquilo
+• Dia 2 (instabilidade média): melodia tensiona, percussão sutil entra, tom ambíguo
+• Dia 3 (instabilidade alta): música discordante, cordas tensas, percussão acelerada
+• Cutscene vitória: fanfarra triunfal que para abruptamente quando o Diretor fala
+• Plot twist: tema melancólico de piano solo
+• Teaser: tema épico com sintetizadores (cyberpunk) e cordas espaciais
+11.2 Efeitos Sonoros
+• Terminal de texto: clack mecânico a cada caractere, som de "bip" ao confirmar
+• Objeto pego: som suave de "whoosh" mágico
+• Objeto solto: som de "plop" físico
+• NPC andando: passos de terra/pedra
+• NPC correndo: passos mais rápidos + som de respiração ofegante
+• NPC caindo: impacto surdo
+• Boato se espalhando: murmúrio de vozes ao fundo
+• Confronto: sons de voz sobrepostos (brigas pixeladas)
+• Barra de instabilidade subindo: som de tensão elétrica crescente
+• Instabilidade 100%: sino de alarme + som de multidão
+• Partículas de fogo: crepitar de fogo loop
+• Água envenenada: borbulhar sinistro
+• Folha caindo: som de vento suave
+• Screen shake: impacto grave
+________________
+
+
+12. CRONOGRAMA E PRIORIDADES
+PRIORIDADE ABSOLUTA — O que DEVE funcionar até segunda
+• ✓ Mapa da aldeia com tileset (mesmo que simples)
+• ✓ 3-5 NPCs com animação walk e idle
+• ✓ Drag-drop de pelo menos 3 objetos
+• ✓ Terminal de narrativa (input de texto)
+• ✓ Backend FastAPI recebendo ação e retornando JSON de eventos
+• ✓ Frontend animando pelo menos: walk_to, shout, fall_down
+• ✓ Barra de instabilidade que sobe e desce
+• ✓ Condição de vitória (cutscene mínima) e game over
+• ✓ Menu principal com botão de iniciar
+• ✓ Créditos e tela de tutorial básica
+SEXTA-FEIRA, 25/09 (Hoje)
+• 18h-20h: Reunião de equipe: decisão final de engine (Godot vs Phaser), distribuição de tarefas
+• 20h-00h: Thales — setup FastAPI, primeiro endpoint /simulate, testar LLM com prompt básico
+• 20h-00h: Eduardo — setup engine, cena base, câmera, TileMap vazio
+• 20h-00h: Danilo — procurar e baixar asset packs gratuitos no itch.io
+SÁBADO, 26/09
+• 8h-13h: Thales — endpoint robusto, prompt do Diretor de Cena funcionando, retorno JSON validado
+• 8h-13h: Eduardo — importar assets, colocar TileMap da aldeia, 3 NPCs no mapa
+• 8h-13h: Danilo — implementar HUD básico (relógio, barra de instabilidade)
+• 13h-18h: Thales — ajustar prompt para gerar roteiros coerentes (testes intensivos)
+• 13h-18h: Eduardo — animações dos NPCs (walk e idle), drag-drop de objetos
+• 13h-18h: Danilo — tela de menu principal e tutorial
+• 18h-23h: Todos — integração inicial (frontend chama backend, resposta retorna)
+DOMINGO, 27/09
+• 8h-14h: Integração completa — loop de turno funcionando end-to-end
+• 14h-18h: Testes de gameplay — jogar o jogo completo, corrigir bugs críticos
+• 18h-22h: Polimento — sons, efeitos de partícula essenciais, cutscene mínima de vitória
+• 22h-24h: Build final, README, créditos, configura itch.io
+SEGUNDA, 28/09
+• 8h-12h: Bugs de última hora, testa em outro computador
+• 12h-15h: Grava vídeo de gameplay (prova de conceito)
+• 15h-21h: Margem de emergência
+• 21h00: SUBMISSÃO NO ITCH.IO — não mais tarde que isso
+________________
+
+
+13. RISCOS E PLANOS DE CONTINGÊNCIA
+Risco 1: API do LLM lenta ou indisponível
+• Solução A: Gravar 10 roteiros JSON de resposta reais em cache local. Se a API falhar, sortear um do cache. O jogo continua funcionando offline.
+• Solução B: Durante apresentação, se houver risco, usar modo "demo hardcoded" — os eventos já estão fixos, mas as animações são reais.
+Risco 2: JSON inválido do LLM
+• Usar Pydantic com schema strict. Se inválido: retornar evento genérico ("npc_baker shout: Os deuses estão com raiva!") com delta +5.
+Risco 3: Escopo grande demais
+• MVP MÍNIMO viável: 1 mapa, 3 NPCs, 3 objetos, 1 endpoint que funciona, tela de vitória básica. Isso é suficiente para concorrer. Construir em cima disso.
+Risco 4: Apresentação ao vivo falha
+• Ter vídeo de gameplay de 3-5 minutos gravado e pronto para mostrar. Executável standalone que não depende de internet (modo cache).
+Risco 5: Assets ruins ou inconsistentes
+• Prioridade: 1 pack coerente do itch.io. Não misture estilos. Consistência visual vale mais que variedade.
+________________
+
+
+─────────────────────────────────────────────────────────
+FIM DO DOCUMENTO
+O Paradoxo do Estagiário — GDD v2.0
+Game Jam CIMATEC 2026.2 — Bora ganhar.
