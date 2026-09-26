@@ -91,7 +91,11 @@ func _ready() -> void:
 	for vid in vdata:
 		var n := NPC.new()
 		var p: Array = vdata[vid]
-		n.setup(vid, {"name": "", "role": "Aldeão", "size": Vector2(28, 44), "home_pos": Vector2(float(p[0]), float(p[1])), "decor": true}, self)
+		var vd: Dictionary = Game.VILLAGER_DEFS.get(vid, {"name": "Aldeão", "role": "Aldeão", "fear": 30, "anger": 20, "loyalty": 50, "cred": 50}).duplicate()
+		vd["size"] = Vector2(28, 44)
+		vd["home_pos"] = Vector2(float(p[0]), float(p[1]))
+		vd["wide_wander"] = true
+		n.setup(vid, vd, self)
 		npc_root.add_child(n)
 		villagers.append(n)
 	for id in Game.OBJECTS:
@@ -221,9 +225,9 @@ func _obj_at(p: Vector2) -> WorldObject:
 
 func _npc_at(p: Vector2) -> NPC:
 	var best: NPC = null
-	var bd := 28.0
-	for id in npcs:
-		var n: NPC = npcs[id]
+	var bd := 34.0
+	var all: Array = npcs.values() + villagers
+	for n in all:
 		if not n.visible:
 			continue
 		var d: float = (n.position + Vector2(0, -20)).distance_to(p)

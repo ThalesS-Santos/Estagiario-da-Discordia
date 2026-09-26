@@ -46,6 +46,14 @@ var NPC_DEFS := {
 		"color": Color(0.6, 0.45, 0.4), "skin": Color(0.93, 0.76, 0.62), "hat": "hair_messy", "size": Vector2(22, 34), "home": "lake"},
 }
 
+var VILLAGER_DEFS := {
+	"villager_farmer": {"name": "Tobias", "role": "Fazendeiro", "fear": 25, "anger": 20, "loyalty": 60, "cred": 60},
+	"villager_woman": {"name": "Helga", "role": "Camponesa", "fear": 35, "anger": 15, "loyalty": 45, "cred": 65},
+	"villager_elder": {"name": "Ancião Osric", "role": "Ancião", "fear": 20, "anger": 10, "loyalty": 70, "cred": 85},
+	"villager_boy": {"name": "Pip", "role": "Menino", "fear": 55, "anger": 5, "loyalty": 30, "cred": 90},
+	"villager_lady": {"name": "Dama Isolde", "role": "Nobre", "fear": 30, "anger": 35, "loyalty": 55, "cred": 50},
+}
+
 # tags: sagrado, veneno, real, comida, arma, escrito, pesado, pequeno
 var OBJECTS := {
 	"apple": {"name": "Maçã vermelha", "tags": ["comida"], "loc": "plaza", "off": Vector2(30, 25)},
@@ -96,6 +104,9 @@ func reset() -> void:
 	npc_state.clear()
 	for id in NPC_DEFS:
 		var d: Dictionary = NPC_DEFS[id]
+		npc_state[id] = {"fear": d.fear, "anger": d.anger, "loyalty": d.loyalty, "cred": d.cred, "memories": []}
+	for id in VILLAGER_DEFS:
+		var d: Dictionary = VILLAGER_DEFS[id]
 		npc_state[id] = {"fear": d.fear, "anger": d.anger, "loyalty": d.loyalty, "cred": d.cred, "memories": []}
 
 

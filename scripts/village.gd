@@ -155,13 +155,32 @@ func _build() -> void:
 		ysort.add_child(ch)
 		chickens.append({"n": ch, "home": _v(p), "t": randf() * 3.0, "state": 0, "target": _v(p)})
 	_build_ambient()
+	_build_lights()
 
 
-func _add_light(pos: Vector2, strength: float) -> void:
+func _build_lights() -> void:
+	var locs: Dictionary = data.get("locations", {})
+	if locs.has("fountain"):
+		_add_light(_v(locs.fountain), 0.5, Color(0.4, 0.65, 1.0))
+	if locs.has("forge"):
+		_add_light(_v(locs.forge), 0.7, Color(1.0, 0.45, 0.15))
+	if locs.has("temple"):
+		_add_light(_v(locs.temple), 0.4, Color(0.9, 0.85, 0.5))
+	var dl := DirectionalLight2D.new()
+	dl.color = Color(1.0, 0.95, 0.8)
+	dl.energy = 0.12
+	dl.blend_mode = Light2D.BLEND_MODE_ADD
+	dl.rotation = deg_to_rad(35.0)
+	dl.height = 120.0
+	dl.max_distance = 2000.0
+	add_child(dl)
+
+
+func _add_light(pos: Vector2, strength: float, col := Color(1.0, 0.62, 0.25)) -> void:
 	var l := PointLight2D.new()
 	l.texture = tex("props/glow")
 	l.position = pos
-	l.color = Color(1.0, 0.62, 0.25)
+	l.color = col
 	l.texture_scale = 2.4 * strength + 0.6
 	l.energy = 0.0
 	l.set_meta("strength", strength)
@@ -286,8 +305,12 @@ func _process(delta: float) -> void:
 		rebel_flags[i].visible = flag_drop >= 0.98
 	for h in torch_flames:
 		h.visible = torch_on
-	for l in lights:
-		l.energy = night * 1.1 * float(l.get_meta("strength"))
+	for i in lights.size():
+		var l: PointLight2D = lights[i]
+		var s: float = float(l.get_meta("strength"))
+		var flicker := 1.0 + sin(time * 8.7 + float(i) * 2.3) * 0.12 + sin(time * 13.1 + float(i) * 5.1) * 0.08
+		l.energy = night * 1.1 * s * flicker
+		l.texture_scale = (2.4 * s + 0.6) * (1.0 + sin(time * 6.3 + float(i) * 3.7) * 0.06)
 	for f in fish:
 		var n: AnimSprite = f.n
 		if fish_dead:

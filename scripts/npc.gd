@@ -143,7 +143,7 @@ func _in_water(p: Vector2) -> bool:
 func _pick_wander() -> Vector2:
 	if id == "npc_orphan":
 		return home + Vector2(randf_range(-110, 110), randf_range(-50, 8))
-	if decor:
+	if decor or def.get("wide_wander", false):
 		return home + Vector2(randf_range(-70, 70), randf_range(-34, 34))
 	return home + Vector2(randf_range(-28, 28), randf_range(-14, 14))
 
@@ -221,9 +221,10 @@ func draw_ui(c: CanvasItem) -> void:
 	var font := ThemeDB.fallback_font
 	if world and world.show_names and not decor and str(def.get("name", "")) != "":
 		var nm := str(def.name)
-		var tw := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		c.draw_rect(Rect2(-tw / 2.0 - 4, 5, tw + 8, 14), Color(0.1, 0.07, 0.12, 0.55))
-		c.draw_string(font, Vector2(-tw / 2.0, 16), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.9))
+		var tw := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+		c.draw_rect(Rect2(-tw / 2.0 - 5, 4, tw + 10, 16), Color(0.04, 0.05, 0.08, 0.88))
+		c.draw_rect(Rect2(-tw / 2.0 - 5, 4, tw + 10, 16), Color(1.0, 0.85, 0.35, 0.6), false, 1.0)
+		c.draw_string(font, Vector2(-tw / 2.0, 16), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 1))
 	if emote_t > 0.0 and emote != "":
 		var bob := sin(t * 6.0) * 2.0
 		var r := Rect2(-14, -h - 34 + bob, 28, 28)
