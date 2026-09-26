@@ -275,36 +275,157 @@ class Backdrop extends Control:
 				draw_circle(Vector2(fx, fy), 5.0, Color(1.0, 0.9, 0.3, fa * 0.12))
 
 
-class Logo extends Control:
+class ButterflyEffectLoading extends Control:
 	var t := 0.0
-
+	var progress := 0.0
+	var current_msg := 0
+	var messages := [
+		"\"O bater de asas de uma borboleta...\"",
+		"\"...pode causar um tufão no outro lado do mundo.\"",
+		"Carregando simulação causal...",
+		"Calculando instabilidade social...",
+		"Iniciando Agência Panóptico..."
+	]
+	
+	var title_lbl: Label
+	var msg_lbl: Label
+	
+	func _ready() -> void:
+		var tw = create_tween()
+		tw.tween_property(self, "progress", 1.0, 8.0)
+		
+		var mt = Timer.new()
+		mt.wait_time = 2.0
+		mt.autostart = true
+		mt.timeout.connect(func(): current_msg = mini(current_msg + 1, messages.size() - 1))
+		add_child(mt)
+		
+		title_lbl = Label.new()
+		title_lbl.text = "O PARADOXO DO ESTAGIÁRIO"
+		title_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+		title_lbl.position = Vector2(0, 160)
+		title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		title_lbl.add_theme_font_size_override("font_size", 42)
+		title_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
+		add_child(title_lbl)
+		
+		msg_lbl = Label.new()
+		msg_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+		msg_lbl.position = Vector2(0, 560)
+		msg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		msg_lbl.add_theme_font_size_override("font_size", 20)
+		add_child(msg_lbl)
+		
 	func _process(d: float) -> void:
 		t += d
+		
+		if is_instance_valid(msg_lbl):
+			msg_lbl.text = messages[current_msg]
+			msg_lbl.add_theme_color_override("font_color", Color(0.6, 0.8, 0.9, 0.6 + 0.4 * sin(t * 3.0)))
+		
 		queue_redraw()
-
+		
 	func _draw() -> void:
-		var c := size / 2.0
-		var flap := 0.5 + 0.5 * absf(sin(t * 2.8))
-		var col := Color(1.0, 0.82, 0.25)
-		var glow_a := 0.15 + 0.1 * sin(t * 2.0)
-		draw_circle(c, 55, Color(1.0, 0.85, 0.3, glow_a))
-		for s in [-1.0, 1.0]:
-			var wing_top := PackedVector2Array([c, c + Vector2(s * 55 * flap, -48), c + Vector2(s * 42 * flap, -20), c + Vector2(s * 65 * flap, 0)])
-			draw_colored_polygon(wing_top, col)
-			draw_colored_polygon(PackedVector2Array([c, c + Vector2(s * 45 * flap, 5), c + Vector2(s * 30 * flap, 42)]), col.darkened(0.2))
-			draw_line(c, c + Vector2(s * 50 * flap, -40), col.darkened(0.3), 1.5)
-			draw_line(c, c + Vector2(s * 55 * flap, -10), col.darkened(0.3), 1.0)
-		draw_rect(Rect2(c.x - 2, c.y - 26, 4, 52), Color(0.35, 0.22, 0.1))
-		var ant_sway := sin(t * 4.0) * 3.0
-		draw_line(Vector2(c.x, c.y - 26), Vector2(c.x - 8 + ant_sway, c.y - 40), Color(0.35, 0.22, 0.1), 1.5)
-		draw_line(Vector2(c.x, c.y - 26), Vector2(c.x + 8 - ant_sway, c.y - 40), Color(0.35, 0.22, 0.1), 1.5)
-		draw_circle(Vector2(c.x - 8 + ant_sway, c.y - 40), 2, col)
-		draw_circle(Vector2(c.x + 8 - ant_sway, c.y - 40), 2, col)
-		var h := c + Vector2(0, 80)
-		draw_colored_polygon(PackedVector2Array([h + Vector2(-18, -18), h + Vector2(18, -18), h + Vector2(3, -1), h + Vector2(-3, -1)]), Color(0.6, 0.85, 1.0, 0.75))
-		var sand := fmod(t * 0.3, 1.0)
-		draw_colored_polygon(PackedVector2Array([h + Vector2(-3, 1), h + Vector2(3, 1), h + Vector2(int(18 * sand), 18), h + Vector2(-int(18 * sand), 18)]), Color(0.6, 0.85, 1.0, 0.75))
-		draw_line(h + Vector2(0, -2), h + Vector2(0, 2), Color(0.85, 0.95, 1.0, 0.6), 1.5)
+		var c = size / 2.0
+		var bar_w = 700.0
+		var bar_x = c.x - bar_w / 2.0
+		var bar_y = c.y + 40.0
+		
+		# Barra base
+		draw_rect(Rect2(bar_x - 4, bar_y - 4, bar_w + 8, 12), Color(0.1, 0.15, 0.2))
+		draw_rect(Rect2(bar_x, bar_y, bar_w * progress, 4), Color(0.4, 0.8, 1.0))
+		
+		# O Furacão (Movendo com o progresso e crescendo)
+		var hurr_x = bar_x + bar_w * progress
+		var hurr_size = 20.0 + progress * 160.0
+		var hurr_steps = 8 + int(progress * 24.0)
+		
+		if progress > 0.02:
+			for i in hurr_steps:
+				var hp = float(i) / float(hurr_steps)
+				var w = hurr_size * (0.15 + hp * 0.85)
+				var hy = bar_y - hp * hurr_size * 1.2 + 5.0
+				
+				var off = sin(t * 18.0 + float(i)) * (hurr_size * 0.1)
+				var rect_w = w + sin(t * 25.0 + float(i*2)) * 12.0
+				
+				var line_thick = 2.0 + progress * 5.0
+				draw_line(Vector2(hurr_x + off - rect_w/2.0, hy), Vector2(hurr_x + off + rect_w/2.0, hy), Color(0.6, 0.75, 0.9, 0.5 + hp * 0.5), line_thick)
+				draw_line(Vector2(hurr_x + off - rect_w/2.0 + 6.0, hy+2), Vector2(hurr_x + off + rect_w/2.0 - 6.0, hy+2), Color(0.9, 0.95, 1.0, 0.7 + hp * 0.3), line_thick * 0.6)
+				
+				# Folhas e poeira
+				for p_i in 2:
+					var angle = t * 25.0 + float(i * 3 + p_i * 10)
+					var px = hurr_x + cos(angle) * (w * 0.65)
+					var py = hy + sin(angle) * 8.0
+					var is_leaf = (i + p_i) % 3 == 0
+					var p_col = Color(0.4, 0.8, 0.3) if is_leaf else Color(1.0, 1.0, 1.0, 0.8)
+					var part_size = 2.0 + progress * 3.0
+					draw_rect(Rect2(px, py, part_size, part_size), p_col)
+					
+		# A Borboleta Pixelada (Estática no início da barra, batendo as asas)
+		var b_x = bar_x - 30.0
+		var b_y = bar_y - 25.0 + sin(t * 8.0) * 5.0
+		
+		var flap = int(t * 14.0) % 4
+		if flap == 3: flap = 1 # Animação: 0, 1, 2, 1
+		
+		var palette = {
+			"y": Color(1.0, 0.85, 0.2),  # Amarelo principal
+			"o": Color(1.0, 0.5, 0.1),   # Laranja detalhes
+			"d": Color(0.8, 0.3, 0.1),   # Laranja escuro
+			"w": Color(1.0, 1.0, 0.9),   # Branco brilho
+			"b": Color(0.3, 0.15, 0.05), # Corpo marrom
+			"a": Color(0.1, 0.05, 0.0)   # Antenas
+		}
+		
+		var frames = [
+			[ # 0 - abertas
+				" a          a ",
+				"  a        a  ",
+				"  wyy    yyw  ",
+				" yyyyo  oyyyy ",
+				" dywyo  oywyd ",
+				" yyyyoaaoyyyy ",
+				"  yyyobboyyy  ",
+				"  ydy bb ydy  ",
+				"   y  bb  y   ",
+				"      bb      "
+			],
+			[ # 1 - meio
+				"              ",
+				"  a        a  ",
+				"   wyy  yyw   ",
+				"  yyyyoooyyy  ",
+				"  dywaaawyd   ",
+				"   yyobboyy   ",
+				"   yd bb dy   ",
+				"      bb      ",
+				"      bb      ",
+				"              "
+			],
+			[ # 2 - fechadas
+				"              ",
+				"              ",
+				"    a    a    ",
+				"     y  y     ",
+				"    ywaawy    ",
+				"    yobboy    ",
+				"     d  d     ",
+				"      bb      ",
+				"      bb      ",
+				"              "
+			]
+		]
+		
+		var p_size = 4.0
+		var frame_data = frames[flap]
+		for row in frame_data.size():
+			var line_str = frame_data[row]
+			for col in line_str.length():
+				var char = line_str[col]
+				if palette.has(char):
+					draw_rect(Rect2(b_x + col * p_size, b_y + row * p_size, p_size, p_size), palette[char])
 
 
 class MenuBtn extends Button:
@@ -470,33 +591,25 @@ func _wait(sec: float) -> bool:
 # ---------------------------------------------------------------- telas
 func show_loading() -> void:
 	var s := _new_screen()
-	_bg(s)
-	var logo := Logo.new()
-	logo.position = Vector2(540, 150)
-	logo.size = Vector2(200, 200)
-	s.add_child(logo)
-	var title := _lbl(s, "O PARADOXO DO ESTAGIÁRIO", 30, Color(1.0, 0.85, 0.35), Vector2(0, 380))
-	var code := _lbl(s, "", 12, Color(0.3, 0.8, 0.5, 0.7), Vector2(240, 440), 800.0, false)
-	var bar := ProgressBar.new()
-	bar.position = Vector2(390, 560)
-	bar.size = Vector2(500, 18)
-	bar.show_percentage = false
-	s.add_child(bar)
+	var bd := Backdrop.new()
+	bd.set_anchors_preset(Control.PRESET_FULL_RECT)
+	s.add_child(bd)
+	
+	var dim = ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.7)
+	s.add_child(dim)
+	
+	var anim := ButterflyEffectLoading.new()
+	anim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	s.add_child(anim)
+	
 	var my := seq_id
-	var tw := create_tween()
-	tw.tween_property(bar, "value", 100.0, 3.6).from(0.0)
-	var chars := "01ABCDEF{}[]<>=;:/#$%"
 	var timer := 0.0
-	while tw.is_running() and my == seq_id:
-		var line := ""
-		for r in 3:
-			for i in 70:
-				line += chars[randi() % chars.length()]
-			line += "\n"
-		code.text = line
-		title.modulate.a = 0.6 + 0.4 * (1.0 if int(timer * 4.0) % 2 == 0 else 0.4)
-		timer += 0.08
-		await get_tree().create_timer(0.08).timeout
+	while timer < 8.5 and my == seq_id:
+		timer += 0.1
+		await get_tree().create_timer(0.1).timeout
+		
 	if my == seq_id:
 		_flash()
 		show_menu()
