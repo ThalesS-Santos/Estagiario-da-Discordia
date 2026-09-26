@@ -8,6 +8,15 @@ signal quit_to_menu
 enum Phase { ACTION, TERMINAL, SIM, ENDED }
 
 const HudScript := preload("res://scripts/hud.gd")
+const GeminiScript := preload("res://scripts/gemini_director.gd")
+
+var gemini_director: GeminiDirector
+var ai_waiting := false
+var pending_gossip := {}
+var location_nodes := {}
+var _ending_day := false
+var _sim_clock_from := 8.0
+var _sim_clock_to := 8.0
 
 var phase: int = Phase.ACTION
 var tutorial := false
@@ -45,12 +54,18 @@ var sim_time := 0.0
 var sim_idx := 0
 var sim_end := 0.0
 var sim_delta := 0.0
+var sim_updates: Array = []
+var crisis := false
+var day_revision := 0
 var sim_running := false
 var snapshot := {}
 var rings: Array = []
 var village: Village
 var villagers: Array = []
 var overlay: Overlay
+var player: PlayerIntern
+var gossip_npc: NPC = null
+const PlayerScene := preload("res://scenes/player_intern.tscn")
 
 
 class Overlay extends Node2D:
@@ -102,6 +117,7 @@ func _ready() -> void:
 		var d: Dictionary = Game.OBJECTS[id]
 		var o := WorldObject.new()
 		o.setup(id, d, Game.loc_pos(d.loc) + d.off)
+		o.item_dropped.connect(_on_item_dropped)
 		obj_root.add_child(o)
 		objects[id] = o
 	cam = Camera2D.new()
@@ -109,18 +125,217 @@ func _ready() -> void:
 	cam.position = cam_target
 	mod = CanvasModulate.new()
 	add_child(mod)
+	_build_ai_locations()
+	gemini_director = _create_gemini_director()
+	gemini_director.name = "GeminiDirector"
+	gemini_director.allowed_locations = PackedStringArray(location_nodes.keys())
+	add_child(gemini_director)
+	gemini_director.butterfly_effect_calculated.connect(_on_caos_gerado)
+	gemini_director.ai_error.connect(_on_gemini_error)
 	hud = HudScript.new()
 	hud.world = self
 	add_child(hud)
-	Game.instability_changed.connect(func(_v): pass)
+	hud.gossip_submitted.connect(_on_gossip_submitted)
+	_build_player()
+	_restore_checkpoint(Game.world_checkpoint)
 	_start_day()
 	if tutorial:
 		hud.show_tutorial()
 
 
+func _create_gemini_director() -> GeminiDirector:
+	return GeminiScript.new()
+
+
+func _build_ai_locations() -> void:
+	var locations := Node2D.new()
+	locations.name = "AILocations"
+	add_child(locations)
+	for id in Game.LOCATIONS:
+		var marker := Marker2D.new()
+		marker.name = id
+		marker.position = Game.loc_pos(id)
+		locations.add_child(marker)
+		location_nodes[id] = marker
+
+
+func _ai_actors() -> Dictionary:
+	var actors := {}
+	for npc: NPC in npcs.values() + villagers:
+		if is_instance_valid(npc) and npc.visible:
+			actors[npc.id] = npc
+	return actors
+
+
+func get_ai_target(id: String) -> Node2D:
+	if location_nodes.has(id):
+		return location_nodes[id]
+	return _ai_actors().get(id)
+
+
+func _live_npc_states() -> Dictionary:
+	var states := {}
+	for npc: NPC in _ai_actors().values():
+		var saved: Dictionary = Game.npc_state.get(npc.id, {})
+		states[npc.id] = {"name": npc.def.get("name", npc.id), "role": npc.def.get("role", ""),
+			"fear": npc.fear, "anger": npc.anger, "loyalty": npc.loyalty,
+			"credulity": saved.get("cred", npc.def.get("cred", 50)),
+			"current_state": npc.current_state,
+			"position": {"x": npc.global_position.x, "y": npc.global_position.y},
+			"memories": saved.get("memories", []).duplicate()}
+	return states
+
+
+func _on_gossip_submitted(_context: Dictionary, text: String) -> void:
+	terminal_submit(text)
+
+
+func _request_caos(narrative: String) -> void:
+	if ai_waiting or gemini_director.is_processing or (held == null and gossip_npc == null):
+		return
+	var action: String
+	if held:
+		action = "Colocou %s (id: %s; características: %s) em %s (id: %s)." % [
+			held.def.name, held.id, ", ".join(held.def.tags),
+			Game.loc_name(Game.nearest_location(drop_pos)), Game.nearest_location(drop_pos)]
+	else:
+		action = "Sussurrou para %s (id: %s) em %s, sem mover um objeto." % [
+			gossip_npc.def.name, gossip_npc.id, Game.loc_name(Game.nearest_location(gossip_npc.position))]
+	pending_gossip = {"text": narrative, "player_action": action}
+	# Capture live states before stopping movement or changing the simulation phase.
+	var states := _live_npc_states()
+	phase = Phase.SIM
+	ai_waiting = true
+	player.input_enabled = false
+	hud.close_terminal()
+	hud.set_sim(true)
+	hud.set_loading(true) # Must precede evaluate: local validation can fail synchronously.
+	gemini_director.evaluate_butterfly_effect(action, narrative, states)
+
+
+func _on_caos_gerado(data: Dictionary) -> void:
+	if not ai_waiting or pending_gossip.is_empty() or not is_inside_tree():
+		return
+	var narrative: String = pending_gossip.text
+	ai_waiting = false
+	pending_gossip.clear()
+	hud.set_loading(false)
+	# Commit inventory and AP only after a valid response; errors leave them intact.
+	if gossip_npc:
+		_commit_gossip(narrative)
+	else:
+		_commit_drop(drop_pos, narrative)
+	if not actions_today.is_empty():
+		actions_today.back()["resolved"] = true
+	if narrative != "":
+		Game.rumors += 1
+	phase = Phase.SIM
+	_ending_day = false
+	var actors := _ai_actors()
+	for npc: NPC in actors.values():
+		npc.ambient = false
+		npc.moving = false
+	for directive: Dictionary in data.npc_updates:
+		var npc: NPC = actors.get(directive.npc_id)
+		if npc == null:
+			continue
+		npc.apply_ai_directive(directive)
+		var dialogue: String = directive.dialogue_bubble
+		if dialogue != "":
+			Game.add_memory(npc.id, dialogue)
+			hud.subtitle(str(npc.def.get("name", npc.id)), dialogue)
+	Game.apply_npc_updates(data.npc_updates)
+	# This signal drives the existing HUD tween. Never add the delta again on end-day.
+	Game.add_instability(float(data.instability_delta))
+	hud.toast("Instabilidade %+d%%" % int(data.instability_delta), 2.5)
+	sim_events.clear()
+	sim_idx = 0
+	sim_time = 0.0
+	sim_end = 4.0
+	_sim_clock_from = clock
+	_sim_clock_to = minf(clock + 3.0, 18.0)
+	sim_running = true
+	Sfx.play("tension")
+
+
+func _on_gemini_error(message: String) -> void:
+	if not ai_waiting or not is_inside_tree():
+		return
+	var text: String = pending_gossip.get("text", "")
+	ai_waiting = false
+	pending_gossip.clear()
+	hud.set_loading(false)
+	hud.set_sim(false)
+	phase = Phase.TERMINAL
+	if gossip_npc:
+		hud.open_terminal("", "", "Sussurrando para %s. Tente novamente." % gossip_npc.def.name)
+	elif held:
+		hud.open_terminal(held.def.name, Game.loc_name(Game.nearest_location(drop_pos)))
+	else:
+		phase = Phase.ACTION
+		player.input_enabled = true
+	hud.term_input.text = text
+	hud.term_err.text = message
+	hud.term_err.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hud.toast(message, 6.0)
+
+
+# ------------------------------------------------------------------ jogador
+func _build_player() -> void:
+	player = PlayerScene.instantiate()
+	player.position = Vector2(640, 500)
+	player.external_drop_control = true
+	player.grab_gate = func(o: WorldObject) -> bool:
+		return phase == Phase.ACTION and held == null and o.attached_to == null and _try_pick(o)
+	player.drop_requested.connect(func(_o, pos: Vector2): _open_drop_terminal(pos))
+	player.open_gossip_terminal.connect(_on_player_gossip)
+	player.gossip_blocked.connect(func(npc): hud.toast("Fique atrás ou ao lado de %s para sussurrar." % str(npc.def.get("name", "ele"))))
+	npc_root.add_child(player)
+	var cam2: Camera2D = player.camera
+	cam2.limit_left = 0
+	cam2.limit_top = 0
+	cam2.limit_right = int(Game.MAP_SIZE.x)
+	cam2.limit_bottom = int(Game.MAP_SIZE.y)
+	cam2.make_current()
+
+
+func _on_player_gossip(npc: Node2D) -> void:
+	if phase != Phase.ACTION or held != null or Game.ap < 1:
+		hud.toast("Sem PA." if Game.ap < 1 else "Solte o objeto antes de sussurrar.")
+		Sfx.play("error")
+		player.end_interaction()
+		return
+	gossip_npc = npc as NPC
+	phase = Phase.TERMINAL
+	hud.open_terminal("", "", "Sussurrando para %s.  O que essa pessoa saberá?" % str(npc.def.get("name", "?")))
+
+
+func _commit_gossip(narrative: String) -> void:
+	var n := gossip_npc
+	gossip_npc = null
+	if n == null:
+		return
+	Game.spend_ap(1)
+	actions_today.append({
+		"obj": null, "from": Vector2.ZERO, "cost": 1,
+		"payload": {"object_id": "", "object_name": "Sussurro para %s" % n.def.name, "tags": [], "location": Game.nearest_location(n.position),
+			"narrative": narrative, "target_npc": n.id},
+	})
+	Sfx.play("confirm")
+	rings.append({"p": n.position, "age": 0.0})
+	n.show_emote("?", 2.5)
+	phase = Phase.ACTION
+	player.end_interaction()
+	player.set_emotion("SMUG")
+
+
 # ------------------------------------------------------------------ dia
 func _start_day() -> void:
+	day_revision += 1
 	phase = Phase.ACTION
+	ai_waiting = false
+	_ending_day = false
+	pending_gossip.clear()
 	clock = 8.0
 	sim_running = false
 	follow = null
@@ -129,6 +344,10 @@ func _start_day() -> void:
 	for id in npcs:
 		var n: NPC = npcs[id]
 		n.get_up()
+		n.current_state = "IDLE"
+		n.fear = int(Game.npc_state[id].fear)
+		n.anger = int(Game.npc_state[id].anger)
+		n.loyalty = int(Game.npc_state[id].loyalty)
 		n.moving = false
 		n.ambient = true
 		n.position = n.home
@@ -139,19 +358,60 @@ func _start_day() -> void:
 	if Game.day >= 3:
 		m.visible = false
 		m.ambient = false
+		m.moving = false
 		m.position = Vector2(-500, -500)
 	else:
 		m.position = Vector2(640, 960)
 		m.walk_to(Game.loc_pos("stall") + Vector2(0, 20))
 		m.home = Game.loc_pos("stall") + Vector2(0, 20)
 	npcs["npc_guard"].position = Game.loc_pos("castle_gate") + Vector2(0, 14)
+	for npc: NPC in villagers:
+		npc.fear = int(Game.npc_state[npc.id].fear)
+		npc.anger = int(Game.npc_state[npc.id].anger)
+		npc.loyalty = int(Game.npc_state[npc.id].loyalty)
+		npc.ambient = true
 	_snapshot()
 	hud.new_day()
+	Game.world_checkpoint = _checkpoint()
 	Game.save_game()
+
+
+func _exit_tree() -> void:
+	ai_waiting = false
+	if is_instance_valid(gemini_director):
+		gemini_director.cancel_pending()
+
+
+func _checkpoint() -> Dictionary:
+	var saved_objects := {}
+	for id in objects:
+		var object: WorldObject = objects[id]
+		var pos := object.position.clamp(Vector2.ZERO, Game.MAP_SIZE)
+		saved_objects[id] = {"x": pos.x, "y": pos.y, "carrier": object.attached_to.id if is_instance_valid(object.attached_to) else ""}
+	return {"objects": saved_objects, "poisoned": poisoned, "fish_dead": fish_dead,
+		"water": water_color.to_html(), "castle_damage": castle_damage,
+		"gate_open": gate_open, "flag_drop": flag_drop, "torch_on": torch_on}
+
+
+func _restore_checkpoint(saved: Dictionary) -> void:
+	if saved.is_empty():
+		return
+	poisoned = saved.poisoned
+	fish_dead = saved.fish_dead
+	water_color = Color.html(saved.water)
+	castle_damage = int(saved.castle_damage)
+	gate_open = float(saved.gate_open)
+	flag_drop = float(saved.flag_drop)
+	torch_on = saved.torch_on
+	for id in saved.objects:
+		var state: Dictionary = saved.objects[id]
+		objects[id].position = Vector2(float(state.x), float(state.y))
+		objects[id].attached_to = npcs.get(state.carrier)
 
 
 func _snapshot() -> void:
 	snapshot = {"instab": Game.instability, "npc": Game.npc_state.duplicate(true), "poisoned": poisoned, "fish_dead": fish_dead, "water": water_color, "rumors": Game.rumors, "obj": {}}
+	snapshot["world"] = _checkpoint()
 	for id in objects:
 		snapshot.obj[id] = objects[id].position
 
@@ -162,7 +422,12 @@ func restart_day() -> void:
 	if held:
 		held.held = false
 		held = null
+	player.forget_held()
+	player.end_interaction()
+	gossip_npc = null
 	for id in objects:
+		if objects[id].drop_tween:
+			objects[id].drop_tween.kill()
 		objects[id].position = snapshot.obj[id]
 		objects[id].attached_to = null
 	Game.set_instability(snapshot.instab)
@@ -171,6 +436,8 @@ func restart_day() -> void:
 	fish_dead = snapshot.fish_dead
 	water_color = snapshot.water
 	Game.rumors = snapshot.rumors
+	_restore_checkpoint(snapshot.world)
+	hud.close_terminal()
 	_start_day()
 
 
@@ -204,9 +471,8 @@ func _debug_autoplay() -> void:
 		return
 	_try_pick(objects["poison_vial"])
 	held_from = held.position
-	_commit_drop(Game.loc_pos("lake") + Vector2(0, -60), "O Rei mandou envenenar a agua do lago")
-	await get_tree().create_timer(1.0).timeout
-	end_day_requested()
+	_open_drop_terminal(Game.loc_pos("lake") + Vector2(0, -60))
+	terminal_submit("O Rei mandou envenenar a agua do lago")
 
 
 func _obj_at(p: Vector2) -> WorldObject:
@@ -243,70 +509,71 @@ func _left_click() -> void:
 		follow = null
 		cam_target = mp
 		return
-	var o := _obj_at(mp)
-	if held:
-		if o and o != held:
-			# segundo clique em outro objeto cancela o primeiro (sem gastar PA)
-			held.held = false
-			held.position = held_from
-			Game.refund_ap(1)
-			held = null
-			_try_pick(o)
-			return
-		_open_drop_terminal(mp)
-		return
-	if o:
-		_try_pick(o)
-		return
+	# Pegar/soltar agora é do PlayerIntern; aqui só resta fixar o card do NPC clicado.
 	var n := _npc_at(mp)
-	if n:
+	if n and _obj_at(mp) == null:
 		hud.show_npc(n, true)
 
 
 func _right_click() -> void:
 	if phase != Phase.ACTION or not held:
 		return
-	var mp := get_global_mouse_position()
-	_commit_drop(mp, "")
+	drop_pos = player.drop_position().clamp(Vector2.ZERO, Game.MAP_SIZE)
+	_request_caos("")
 
 
-func _try_pick(o: WorldObject) -> void:
+func _try_pick(o: WorldObject) -> bool:
+	if phase != Phase.ACTION or held != null:
+		return false
 	if Game.ap < 2:
 		hud.toast("PA insuficiente — pegar + soltar custam 2 PA.")
 		Sfx.play("error")
-		return
+		return false
 	Game.spend_ap(1)
 	held = o
 	held_from = o.position
 	o.held = true
 	Sfx.play("whoosh")
+	return true
 
 
 func _open_drop_terminal(mp: Vector2) -> void:
+	if held:
+		held.request_drop(mp.clamp(Vector2.ZERO, Game.MAP_SIZE))
+
+
+func _on_item_dropped(context: Dictionary) -> void:
+	if not held or phase != Phase.ACTION:
+		return
 	phase = Phase.TERMINAL
-	drop_pos = mp
-	held.position = mp
-	var loc := Game.nearest_location(mp)
+	drop_pos = context.position
+	held.position = drop_pos
+	var loc := Game.nearest_location(drop_pos)
 	hud.open_terminal(held.def.name, Game.loc_name(loc))
 
 
 func terminal_cancel() -> void:
 	if phase == Phase.TERMINAL:
 		phase = Phase.ACTION
+		if gossip_npc:
+			gossip_npc = null
+			player.end_interaction()
 
 
 func terminal_submit(text: String) -> void:
 	if phase != Phase.TERMINAL:
 		return
-	_commit_drop(drop_pos, text.strip_edges())
+	_request_caos(text.strip_edges())
 
 
 func _commit_drop(p: Vector2, narrative: String) -> void:
 	if not held:
 		return
+	p = p.clamp(Vector2.ZERO, Game.MAP_SIZE)
 	Game.spend_ap(1)
 	var o := held
 	held = null
+	player.forget_held()
 	var loc := Game.nearest_location(p)
 	o.drop_to(p)
 	actions_today.append({
@@ -319,11 +586,6 @@ func _commit_drop(p: Vector2, narrative: String) -> void:
 		Sfx.play("confirm")
 	phase = Phase.ACTION
 	get_tree().create_timer(0.4).timeout.connect(func(): emit_particle("dust_small", p))
-	if Game.ap < 2:
-		hud.toast("Sem PA suficientes — encerrando o dia...")
-		get_tree().create_timer(1.6).timeout.connect(func():
-			if phase == Phase.ACTION and not held:
-				end_day_requested())
 
 
 func undo() -> void:
@@ -333,12 +595,19 @@ func undo() -> void:
 		held.held = false
 		held.position = held_from
 		held = null
+		player.forget_held()
 		Game.refund_ap(1)
 		return
 	if actions_today.is_empty():
 		return
+	if actions_today.back().get("resolved", false):
+		hud.toast("Essa ação já gerou consequências. Use Reiniciar Dia para voltar.")
+		return
 	var a: Dictionary = actions_today.pop_back()
-	a.obj.position = a.from
+	if a.obj:
+		if a.obj.drop_tween:
+			a.obj.drop_tween.kill()
+		a.obj.position = a.from
 	Game.refund_ap(a.cost)
 	hud.toast("Ação desfeita.")
 
@@ -350,60 +619,25 @@ func end_day_requested() -> void:
 		held.held = false
 		held.position = held_from
 		held = null
+		player.forget_held()
 		Game.refund_ap(1)
 	_start_simulation()
 
 
 # ------------------------------------------------------------------ simulação
-func _build_payload() -> Dictionary:
-	var acts: Array = []
-	for a in actions_today:
-		acts.append(a.payload)
-	var ws := {}
-	for id in npcs:
-		ws[id] = {"fear": Game.npc_state[id].fear, "anger": Game.npc_state[id].anger, "loyalty": Game.npc_state[id].loyalty,
-			"credulity": Game.npc_state[id].cred, "x": int(npcs[id].position.x), "y": int(npcs[id].position.y)}
-	var mem := {}
-	for id in npcs:
-		mem[id] = Game.npc_state[id].memories
-	return {"player": Game.player_name, "day": Game.day, "instability": Game.instability, "rumors": Game.rumors,
-		"actions": acts, "world_state": {"npcs": ws, "water_poisoned": poisoned}, "npc_memories": mem}
-
-
 func _start_simulation() -> void:
+	# End-day is now only a time transition; each action was already sent to Gemini.
 	phase = Phase.SIM
-	hud.set_sim(true)
-	hud.toast("A IA está escrevendo o roteiro...")
-	for id in npcs:
-		npcs[id].ambient = false
-		npcs[id].moving = false
-	var payload := _build_payload()
-	var res: Dictionary = await Director.simulate(payload)
-	for a in actions_today:
-		if a.payload.narrative != "":
-			Game.rumors += 1
-	sim_events = res.events.duplicate()
-	sim_delta = float(res.instability_delta)
-	_apply_world_changes(res.get("world_changes", {}))
-	# reações do Rei e do Guarda conforme a instabilidade
-	var proj := Game.instability + sim_delta
-	var last_t := 0.0
-	for e in sim_events:
-		last_t = maxf(last_t, float(e.t))
-	if proj >= 80.0:
-		sim_events.append({"t": last_t + 2, "npc_id": "npc_guard", "action": "run_to", "target": "castle_yard", "dialogue": "", "particles": ["dust_small"], "sound": ""})
-		sim_events.append({"t": last_t + 6, "npc_id": "npc_guard", "action": "talk_to", "target": "npc_king", "dialogue": "Majestade, o povo está inquieto!", "particles": ["exclamation"], "sound": "gasp"})
-		sim_events.append({"t": last_t + 6.5, "npc_id": "npc_king", "action": "walk_to", "target": "castle_yard", "dialogue": "", "particles": [], "sound": ""})
-		last_t += 6.5
-	if proj >= 95.0:
-		sim_events.append({"t": last_t + 2, "npc_id": "npc_king", "action": "flee", "target": "north", "dialogue": "Guardas! Protejam-me!", "particles": ["exclamation"], "sound": "horn"})
-		last_t += 2
-	sim_events.sort_custom(func(a, b): return float(a.t) < float(b.t))
-	sim_time = 0.0
+	_ending_day = true
+	sim_events.clear()
 	sim_idx = 0
-	sim_end = last_t + 5.0
+	sim_time = 0.0
+	sim_end = 2.0
+	_sim_clock_from = clock
+	_sim_clock_to = 22.0
 	sim_running = true
-	hud.toast("Fonte do roteiro: %s" % {"ia": "IA (backend)", "local": "modo offline", "fallback": "fallback genérico"}.get(Director.last_source, "?"), 3.0)
+	player.input_enabled = false
+	hud.set_sim(true)
 
 
 func _apply_world_changes(wc: Dictionary) -> void:
@@ -414,27 +648,30 @@ func _apply_world_changes(wc: Dictionary) -> void:
 
 
 func _finish_sim() -> void:
+	if not sim_running or phase != Phase.SIM:
+		return
 	sim_running = false
-	phase = Phase.ENDED
-	hud.set_sim(false)
-	var before := Game.instability
-	Game.add_instability(sim_delta)
-	for id in npcs:
-		if id != "npc_king":
-			Game.bump(id, "anger", sim_delta * 0.3)
-			Game.bump(id, "fear", sim_delta * 0.2)
-	Sfx.play("tension")
-	hud.toast("Instabilidade %+d%%" % int(round(Game.instability - before)), 2.5)
-	await get_tree().create_timer(2.0).timeout
+	# Instability and NPC stats were committed in _on_caos_gerado, exactly once.
 	if Game.instability >= 100.0:
+		phase = Phase.ENDED
 		await _victory_sequence()
 		victory.emit()
-	elif Game.day >= Game.MAX_DAYS:
-		await _defeat_sequence()
-		defeat.emit()
+	elif _ending_day:
+		phase = Phase.ENDED
+		if Game.day >= Game.MAX_DAYS:
+			await _defeat_sequence()
+			defeat.emit()
+		else:
+			Game.day += 1
+			_start_day()
 	else:
-		Game.day += 1
-		_start_day()
+		phase = Phase.ACTION
+		for npc: NPC in _ai_actors().values():
+			npc.ambient = true
+		player.input_enabled = true
+		if Game.ap == 0:
+			hud.toast("Sem PA — encerre o dia para continuar.")
+	hud.set_sim(false)
 
 
 func _dispatch(e: Dictionary) -> void:
@@ -454,6 +691,12 @@ func _dispatch(e: Dictionary) -> void:
 	if e.sound != "":
 		Sfx.play(e.sound)
 	match act:
+		"directive":
+			if npc:
+				npc.apply_ai_directive(e.directive)
+				if e.directive.dialogue_bubble != "":
+					hud.subtitle(npc.def.name, e.directive.dialogue_bubble)
+					Game.add_memory(npc.id, e.directive.dialogue_bubble)
 		"walk_to":
 			if npc:
 				npc.walk_to(_resolve(tgt))
@@ -576,6 +819,10 @@ func _resolve(loc_name: String) -> Vector2:
 
 # ------------------------------------------------------------------ cutscenes
 func _victory_sequence() -> void:
+	crisis = true
+	for light in village.lights:
+		if light is PointLight2D:
+			light.color = Color(1.0, 0.25, 0.08)
 	hud.set_ui_visible(false)
 	hud.alarm()
 	Sfx.play("alarm")
@@ -613,6 +860,9 @@ func _victory_sequence() -> void:
 	npcs["npc_king"].fall()
 	await get_tree().create_timer(3.0).timeout
 	hud.flash()
+	for n in npcs.values() + villagers:
+		n.moving = false
+		n.set_physics_process(false)
 	await get_tree().create_timer(0.6).timeout
 
 
@@ -698,19 +948,22 @@ func _process(delta: float) -> void:
 		if hn != hovered_npc:
 			hovered_npc = hn
 		hud.set_hover(hovered_obj, hovered_npc)
-	if held:
-		held.position = held.position.lerp(mp + Vector2(0, -18), 0.35) if phase == Phase.ACTION else drop_pos
+	if held == null and player.held_object != null:
+		player.forget_held()
+	player.input_enabled = phase == Phase.ACTION
+	if held and (phase == Phase.TERMINAL or ai_waiting):
+		held.position = drop_pos
 	# simulação
 	if sim_running:
 		sim_time += delta * float(Game.settings.sim_speed)
 		while sim_idx < sim_events.size() and float(sim_events[sim_idx].t) <= sim_time:
 			_dispatch(sim_events[sim_idx])
 			sim_idx += 1
-		clock = lerpf(8.0, 22.0, clampf(sim_time / maxf(sim_end, 1.0), 0.0, 1.0))
+		clock = lerpf(_sim_clock_from, _sim_clock_to, clampf(sim_time / maxf(sim_end, 1.0), 0.0, 1.0))
 		if sim_idx >= sim_events.size() and sim_time >= sim_end:
 			var idle := true
-			for id in npcs:
-				if npcs[id].moving:
+			for npc: NPC in _ai_actors().values():
+				if npc.moving:
 					idle = false
 			if idle or sim_time > sim_end + 10.0:
 				_finish_sim()
@@ -725,17 +978,11 @@ func _process(delta: float) -> void:
 					best = n
 			if best and time - bt < 8.0:
 				cam_target = best.position
-	elif phase == Phase.ACTION:
-		var v := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
-		var k := Vector2.ZERO
-		if Input.is_key_pressed(KEY_A): k.x -= 1
-		if Input.is_key_pressed(KEY_D): k.x += 1
-		if Input.is_key_pressed(KEY_W): k.y -= 1
-		if Input.is_key_pressed(KEY_S): k.y += 1
-		cam_target += (v + k).limit_length(1.0) * 420.0 * delta
+	elif phase == Phase.ACTION or phase == Phase.TERMINAL:
+		cam_target = player.global_position
 	_update_cam(delta)
 	# luz ambiente
-	mod.color = _ambient()
+	mod.color = Color("1a1a2e") if crisis else _ambient()
 	# anéis de narrativa
 	for r in rings:
 		r.age += delta
@@ -760,6 +1007,15 @@ func _update_cam(_delta: float) -> void:
 	cam.position = cam.position.lerp(cam_target, 0.08 if phase != Phase.ACTION else 0.15)
 	cam.zoom = cam.zoom.lerp(Vector2(cam_zoom, cam_zoom), 0.1)
 	cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake)) if shake > 0.1 else Vector2.ZERO
+	# Ação/terminal: câmera do jogador; simulação/cinemáticas: câmera do mundo (segue NPCs).
+	player.camera.zoom = cam.zoom
+	player.camera.offset = cam.offset
+	if phase == Phase.ACTION or phase == Phase.TERMINAL:
+		if not player.camera.is_current():
+			player.camera.make_current()
+		cam.position = player.camera.get_screen_center_position()
+	elif not cam.is_current():
+		cam.make_current()
 
 
 func _ambient() -> Color:

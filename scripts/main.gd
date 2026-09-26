@@ -533,7 +533,7 @@ func show_credits() -> void:
 	var chars := "01ABCDEF{}[]<>=;:/#$%"
 	var side_l := _lbl(s, "", 12, Color(0.2, 0.7, 0.4, 0.5), Vector2(20, 0), 200.0, false)
 	var side_r := _lbl(s, "", 12, Color(0.2, 0.7, 0.4, 0.5), Vector2(1060, 0), 200.0, false)
-	var credits := "O PARADOXO DO ESTAGIÁRIO\nGame Jam CIMATEC 2026.2 — Tema: Efeito Borboleta\n\n\nDESENVOLVIDO POR\nThales — Backend / IA / Integração\nEduardo — Engine / Gameplay\nDanilo — UI / Assets\n\n\nMOTOR IA\nClaude (Anthropic)\n\n\nENGINE\nGodot 4.x\n\n\nASSETS\nTiny Town — Kenney (kenney.nl, CC0)\nPersonagens, castelo, árvores e animações:\npixel art própria no estilo Kenney\n\n\nAGRADECIMENTOS\nCIMATEC · Game Jam 2026.2\n\n\n> rm -rf /linha_do_tempo\n> ...\n> Anomalia removida."
+	var credits := "O PARADOXO DO ESTAGIÁRIO\nGame Jam CIMATEC 2026.2 — Tema: Efeito Borboleta\n\n\nDESENVOLVIDO POR\nThales — Backend / IA / Integração\nEduardo — Engine / Gameplay\nDanilo — UI / Assets\n\n\nMOTOR IA\nGemini (Google) — integração via backend\n\n\nENGINE\nGodot 4.x\n\n\nASSETS\nTiny Town — Kenney (kenney.nl, CC0)\nPersonagens, castelo, árvores e animações:\npixel art própria no estilo Kenney\n\n\nAGRADECIMENTOS\nCIMATEC · Game Jam 2026.2\n\n\n> rm -rf /linha_do_tempo\n> ...\n> Anomalia removida."
 	var cl := _lbl(s, credits, 20, Color(0.75, 1.0, 0.85), Vector2(340, 720), 600.0)
 	cl.size = Vector2(600, 900)
 	_btn(s, "[ VOLTAR ]", show_menu).position = Vector2(20, 660)
@@ -562,7 +562,7 @@ func show_defeat() -> void:
 	_bg(s)
 	var l := _lbl(s, "", 22, Color(1.0, 0.5, 0.45), Vector2(240, 200), 800.0)
 	Sfx.play("horn")
-	_type(l, "Estagiário %s. Você foi demitido.\nA anomalia persiste.\n\n\nMISSÃO FRACASSADA\nA aldeia permanece estável.\nO Rei permanece no trono.\nVocê perdeu seu emprego." % Game.player_name, 40.0)
+	_type(l, "ANOMALIA NÃO CONTIDA.\nDEMISSÃO DO ESTAGIÁRIO\n\nOperador %s, a missão fracassou.\nO Rei permanece no trono." % Game.player_name, 40.0)
 	if not await _wait(6.0):
 		return
 	var box := HBoxContainer.new()

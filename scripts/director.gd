@@ -1,84 +1,103 @@
 extends Node
-## Cliente do backend FastAPI (autoload "Director").
-## POST {base_url}/simulate -> roteiro de eventos. Se o backend estiver fora do ar,
-## usa o LocalDirector (modo offline, o jogo continua funcionando).
+## Runtime client for our backend. Gemini credentials remain on the server.
+signal ai_error(message: String)
+signal butterfly_effect_calculated(data: Dictionary)
+signal request_state_changed(waiting: bool)
 
-var base_url := "http://127.0.0.1:8000"
+const SYSTEM_PROMPT := AIContract.SYSTEM_PROMPT
+const MAX_RESPONSE_BYTES := 65536
+const BLOCKED := ["idiota", "merda", "porra", "caralho", "puta", "viado", "retardado"]
+var base_url := ""
 var last_source := "local"
 var offline_until := 0
+var busy := false
+var _generation := 0
+var _http: HTTPRequest
 
-const BLOCKED := ["idiota", "merda", "porra", "caralho", "puta", "viado", "retardado"]
-
+func _ready() -> void:
+	base_url = str(ProjectSettings.get_setting("game/ai/backend_url", "")).trim_suffix("/")
+	if OS.has_environment("PARADOXO_BACKEND_URL"):
+		base_url = OS.get_environment("PARADOXO_BACKEND_URL").trim_suffix("/")
 
 func is_offensive(text: String) -> bool:
-	var t := LocalDirector.norm(text)
-	for w in BLOCKED:
-		if t.contains(w):
+	# UX filter only; moderation must also be enforced by the backend.
+	for word in LocalDirector.norm(text).split(" "):
+		if BLOCKED.has(word.strip_edges().trim_suffix("!").trim_suffix(".").trim_suffix(",")):
 			return true
 	return false
 
+func cancel_pending() -> void:
+	_generation += 1
+	busy = false
+	if is_instance_valid(_http):
+		_http.cancel_request()
+		# Cancellation otherwise leaves the awaiting coroutine suspended.
+		_http.request_completed.emit(HTTPRequest.RESULT_REQUEST_FAILED, 0, PackedStringArray(), PackedByteArray())
+	request_state_changed.emit(false)
+
+func evaluate_butterfly_effect(player_action: String, gossip: String, npcs_state: Dictionary) -> Dictionary:
+	return await simulate({"actions": [{"player_action": player_action.left(500), "narrative": gossip.left(240)}],
+		"world_state": {"npcs": npcs_state}, "day": Game.day,
+		"instability": Game.instability, "rumors": Game.rumors})
 
 func simulate(payload: Dictionary) -> Dictionary:
-	# backend caiu há pouco: não fica esperando de novo, usa o modo offline direto
-	if Time.get_ticks_msec() < offline_until:
+	if busy:
+		ai_error.emit("Já existe uma simulação em andamento.")
+		return {}
+	if base_url == "" or Time.get_ticks_msec() < offline_until:
 		return _local(payload)
+	if not _valid_endpoint():
+		return _fallback(payload, "Endereço do serviço de IA inválido. Usando simulação local.")
+	busy = true
+	_generation += 1
+	var generation := _generation
+	request_state_changed.emit(true)
+	var body := payload.duplicate(true)
+	body["schema_version"] = AIContract.VERSION
+	body["locale"] = TranslationServer.get_locale()
+	body["allowed_npcs"] = Game.NPC_DEFS.keys()
+	body["allowed_locations"] = Game.LOCATIONS.keys()
+	var request_id := Crypto.new().generate_random_bytes(16).hex_encode()
+	body["request_id"] = request_id
 	var http := HTTPRequest.new()
-	http.timeout = 4.0
+	_http = http
+	http.timeout = 20.0
+	http.body_size_limit = MAX_RESPONSE_BYTES
+	http.max_redirects = 0
 	add_child(http)
-	var err := http.request(base_url + "/simulate", ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify(payload))
-	if err != OK:
-		http.queue_free()
-		return _local(payload)
-	var res: Array = await http.request_completed
+	var err := http.request(base_url + "/simulate", ["Content-Type: application/json", "Idempotency-Key: " + request_id], HTTPClient.METHOD_POST, JSON.stringify(body))
+	var response: Array = []
+	if err == OK:
+		response = await http.request_completed
+	if _http == http:
+		_http = null
 	http.queue_free()
-	if res[0] != HTTPRequest.RESULT_SUCCESS or res[1] != 200:
-		offline_until = Time.get_ticks_msec() + 60000
-		return _local(payload)
-	var parsed = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
-	var v := _validate(parsed)
-	if v.is_empty():
-		last_source = "fallback"
-		return _generic_fallback()
-	last_source = "ia"
-	return v
+	if generation != _generation:
+		return {}
+	busy = false
+	request_state_changed.emit(false)
+	if err != OK or response.is_empty() or response[0] != HTTPRequest.RESULT_SUCCESS or response[1] != 200:
+		return _fallback(payload, "Serviço de IA indisponível. Continuando com a simulação local.")
+	var parsed = JSON.parse_string((response[3] as PackedByteArray).get_string_from_utf8())
+	var result := AIContract.validate(parsed, Game.NPC_DEFS.keys(), Game.LOCATIONS.keys())
+	if result.is_empty():
+		return _fallback(payload, "A IA retornou uma resposta inválida. Continuando com a simulação local.")
+	last_source = "gemini"
+	butterfly_effect_calculated.emit(result.duplicate(true))
+	return AIContract.to_simulation(result)
 
+func _valid_endpoint() -> bool:
+	if base_url.begins_with("https://"):
+		return true
+	var loopback := RegEx.new()
+	loopback.compile("^http://(127\\.0\\.0\\.1|localhost):[0-9]{1,5}(/[a-zA-Z0-9_/-]*)?$")
+	return loopback.search(base_url) != null
+
+func _fallback(payload: Dictionary, message: String) -> Dictionary:
+	offline_until = Time.get_ticks_msec() + 60000
+	ai_error.emit(message)
+	return _local(payload)
 
 func _local(payload: Dictionary) -> Dictionary:
 	last_source = "local"
 	return LocalDirector.generate(payload)
-
-
-func _generic_fallback() -> Dictionary:
-	return {
-		"events": [{"t": 1.0, "npc_id": "npc_baker", "action": "shout", "target": "", "dialogue": "Os deuses estão com raiva!", "particles": ["exclamation"], "sound": "shout"}],
-		"instability_delta": 5.0,
-		"world_changes": {},
-	}
-
-
-func _validate(d) -> Dictionary:
-	if typeof(d) != TYPE_DICTIONARY or typeof(d.get("events")) != TYPE_ARRAY:
-		return {}
-	var out: Array = []
-	for e in d.events:
-		if typeof(e) != TYPE_DICTIONARY or typeof(e.get("action")) != TYPE_STRING:
-			continue
-		out.append({
-			"t": float(e.get("t", 0.0)),
-			"npc_id": str(e.get("npc_id", "")),
-			"action": e.action,
-			"target": str(e.get("target", "")),
-			"dialogue": str(e.get("dialogue", "")),
-			"particles": e.get("particles", []) if typeof(e.get("particles", [])) == TYPE_ARRAY else [],
-			"sound": str(e.get("sound", "")),
-		})
-		if out.size() >= 12:
-			break
-	if out.is_empty():
-		return {}
-	var wc = d.get("world_changes", {})
-	return {
-		"events": out,
-		"instability_delta": clampf(float(d.get("instability_delta", 0.0)), -20.0, 45.0),
-		"world_changes": wc if typeof(wc) == TYPE_DICTIONARY else {},
-	}

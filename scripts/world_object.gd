@@ -1,5 +1,6 @@
 class_name WorldObject
 extends Node2D
+signal item_dropped(action_context: Dictionary)
 ## Objeto carregável do mapa, desenhado com o ícone pixel art de assets/gen/props/items.png.
 
 const GEN := "res://assets/gen/"
@@ -16,11 +17,17 @@ var attached_to = null
 var icon: Sprite2D
 var ring: AnimSprite
 var shadow: Sprite2D
+var drop_tween: Tween
+
+
+func request_drop(p: Vector2) -> void:
+	item_dropped.emit({"object_id": id, "position": p, "location": Game.nearest_location(p)})
 
 
 func setup(obj_id: String, d: Dictionary, pos: Vector2) -> void:
 	id = obj_id
 	def = d
+	add_to_group("grabbable")
 	position = pos
 	t = randf() * 6.0
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -63,8 +70,10 @@ func display_tags() -> Array:
 
 func drop_to(p: Vector2) -> void:
 	held = false
-	var tw := create_tween()
-	tw.tween_property(self, "position", p, 0.35).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	if drop_tween:
+		drop_tween.kill()
+	drop_tween = create_tween()
+	drop_tween.tween_property(self, "position", p, 0.35).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
 
 
 func _process(delta: float) -> void:

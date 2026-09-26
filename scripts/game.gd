@@ -3,6 +3,7 @@ extends Node
 
 signal instability_changed(value: float)
 signal ap_changed(value: int)
+signal save_error(message: String)
 
 const MAP_SIZE := Vector2(1280, 960)
 const MAX_DAYS := 3
@@ -86,6 +87,8 @@ var ap := 3
 var instability := 5.0
 var rumors := 0
 var npc_state := {}
+var world_checkpoint := {}
+var persistence_enabled := true
 var ui_theme: Theme
 var settings := {"master": 1.0, "music": 0.8, "sfx": 0.8, "sim_speed": 1.0, "resolution": 0, "subtitles": true, "colorblind": false}
 
@@ -102,6 +105,7 @@ func reset() -> void:
 	instability = 5.0
 	rumors = 0
 	npc_state.clear()
+	world_checkpoint.clear()
 	for id in NPC_DEFS:
 		var d: Dictionary = NPC_DEFS[id]
 		npc_state[id] = {"fear": d.fear, "anger": d.anger, "loyalty": d.loyalty, "cred": d.cred, "memories": []}
@@ -180,21 +184,46 @@ func bump(npc_id: String, stat: String, amount: float) -> void:
 
 # ---------- persistência ----------
 func has_save() -> bool:
-	return FileAccess.file_exists(SAVE_PATH)
+	return FileAccess.file_exists(SAVE_PATH) or FileAccess.file_exists(SAVE_PATH + ".bak")
 
 
-func save_game() -> void:
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if f:
-		f.store_string(JSON.stringify({"name": player_name, "day": day, "instability": instability, "rumors": rumors, "npc": npc_state}))
-
-
-func load_game() -> bool:
-	if not has_save():
+func save_game(path := SAVE_PATH) -> bool:
+	if not persistence_enabled:
+		return true
+	var temp := path + ".tmp"
+	var f := FileAccess.open(temp, FileAccess.WRITE)
+	if not f:
+		save_error.emit("Não foi possível salvar o progresso.")
 		return false
-	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
-	var d = JSON.parse_string(f.get_as_text())
-	if typeof(d) != TYPE_DICTIONARY:
+	f.store_string(JSON.stringify({"version": 2, "name": player_name, "day": day,
+		"instability": instability, "rumors": rumors, "npc": npc_state, "world": world_checkpoint}))
+	f.flush()
+	var write_error := f.get_error()
+	f.close()
+	if write_error != OK:
+		save_error.emit("Não foi possível gravar o progresso.")
+		return false
+	var absolute := ProjectSettings.globalize_path(path)
+	if FileAccess.file_exists(path):
+		if FileAccess.file_exists(path + ".bak"):
+			DirAccess.remove_absolute(absolute + ".bak")
+		if DirAccess.rename_absolute(absolute, absolute + ".bak") != OK:
+			save_error.emit("Não foi possível preservar o salvamento anterior.")
+			return false
+	if DirAccess.rename_absolute(ProjectSettings.globalize_path(temp), absolute) != OK:
+		if FileAccess.file_exists(path + ".bak"):
+			DirAccess.rename_absolute(absolute + ".bak", absolute)
+		save_error.emit("Não foi possível concluir o salvamento.")
+		return false
+	return true
+
+
+func load_game(path := SAVE_PATH) -> bool:
+	var d := _read_save(path)
+	if d.is_empty():
+		d = _read_save(path + ".bak")
+	if d.is_empty():
+		save_error.emit("Salvamento inválido ou indisponível.")
 		return false
 	reset()
 	player_name = str(d.get("name", player_name))
@@ -206,7 +235,79 @@ func load_game() -> bool:
 		for id in n:
 			if npc_state.has(id):
 				npc_state[id] = n[id]
+	world_checkpoint = d.get("world", {}).duplicate(true)
 	return true
+
+
+func _read_save(path: String) -> Dictionary:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if not f or f.get_length() > 262144:
+		return {}
+	var data = JSON.parse_string(f.get_as_text())
+	if typeof(data) != TYPE_DICTIONARY:
+		return {}
+	var version = data.get("version", 1)
+	if not AIContract.number_in(version, 1, 2) or float(version) != floorf(float(version)):
+		return {}
+	if typeof(data.get("name")) != TYPE_STRING or data.name.length() > 12:
+		return {}
+	for field in [["day", 1, MAX_DAYS], ["instability", 0, 100], ["rumors", 0, 10000]]:
+		if not AIContract.number_in(data.get(field[0]), field[1], field[2]):
+			return {}
+	if float(data.day) != floorf(float(data.day)) or float(data.rumors) != floorf(float(data.rumors)):
+		return {}
+	if typeof(data.get("npc")) != TYPE_DICTIONARY:
+		return {}
+	for id in data.npc:
+		var state = data.npc[id]
+		if not NPC_DEFS.has(id) and not VILLAGER_DEFS.has(id):
+			return {}
+		if typeof(state) != TYPE_DICTIONARY:
+			return {}
+		for stat in ["fear", "anger", "loyalty", "cred"]:
+			if not AIContract.number_in(state.get(stat), 0, 100):
+				return {}
+		if typeof(state.get("memories")) != TYPE_ARRAY or state.memories.size() > 6:
+			return {}
+		for memory in state.memories:
+			if typeof(memory) != TYPE_STRING or memory.length() > 500:
+				return {}
+	var checkpoint = data.get("world", {})
+	if typeof(checkpoint) != TYPE_DICTIONARY:
+		return {}
+	if not checkpoint.is_empty() and not _valid_checkpoint(checkpoint):
+		return {}
+	return data
+
+
+func _valid_checkpoint(checkpoint: Dictionary) -> bool:
+	for key in ["poisoned", "fish_dead", "torch_on"]:
+		if typeof(checkpoint.get(key)) != TYPE_BOOL:
+			return false
+	for field in [["castle_damage", 0, 3], ["gate_open", 0, 1], ["flag_drop", 0, 1]]:
+		if not AIContract.number_in(checkpoint.get(field[0]), field[1], field[2]):
+			return false
+	if typeof(checkpoint.get("water")) != TYPE_STRING or not Color.html_is_valid(checkpoint.water):
+		return false
+	if typeof(checkpoint.get("objects")) != TYPE_DICTIONARY or checkpoint.objects.size() != OBJECTS.size():
+		return false
+	for id in checkpoint.objects:
+		var obj = checkpoint.objects[id]
+		if not OBJECTS.has(id) or typeof(obj) != TYPE_DICTIONARY:
+			return false
+		if not AIContract.number_in(obj.get("x"), 0, MAP_SIZE.x) or not AIContract.number_in(obj.get("y"), 0, MAP_SIZE.y):
+			return false
+		if typeof(obj.get("carrier")) != TYPE_STRING or (obj.carrier != "" and not NPC_DEFS.has(obj.carrier)):
+			return false
+	return true
+
+
+func apply_npc_updates(updates: Array) -> void:
+	for update in updates:
+		if npc_state.has(update.npc_id):
+			npc_state[update.npc_id].fear = update.fear_level
+			npc_state[update.npc_id].anger = update.anger_level
+			npc_state[update.npc_id].loyalty = update.loyalty_level
 
 
 func load_settings() -> void:

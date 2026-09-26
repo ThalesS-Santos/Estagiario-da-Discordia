@@ -1,0 +1,77 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/player_intern.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://assets/gen/chars/player_intern.png" id="2_body"]
+[ext_resource type="Texture2D" path="res://assets/gen/player/head.png" id="3_head"]
+[ext_resource type="Texture2D" path="res://assets/gen/player/hair.png" id="4_hair"]
+[ext_resource type="Texture2D" path="res://assets/gen/player/cloak_tail.png" id="5_tail"]
+[ext_resource type="Texture2D" path="res://assets/gen/player/emotes.png" id="6_emotes"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_feet"]
+radius = 5.0
+height = 12.0
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_zone"]
+radius = 40.0
+
+[node name="PlayerIntern" type="CharacterBody2D"]
+texture_filter = 1
+collision_layer = 2
+collision_mask = 1
+motion_mode = 1
+script = ExtResource("1_script")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -6)
+shape = SubResource("CapsuleShape2D_feet")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+scale = Vector2(2, 2)
+texture = ExtResource("2_body")
+centered = false
+offset = Vector2(-8, -23)
+hframes = 4
+vframes = 6
+
+[node name="HeadSprite" type="Sprite2D" parent="Sprite2D"]
+position = Vector2(0, -6)
+texture = ExtResource("3_head")
+centered = false
+offset = Vector2(-8, -5)
+hframes = 4
+
+[node name="HairSprite" type="Sprite2D" parent="Sprite2D"]
+position = Vector2(0, -11)
+texture = ExtResource("4_hair")
+centered = false
+offset = Vector2(-8, -4)
+
+[node name="CloakTailSprite" type="Sprite2D" parent="Sprite2D"]
+show_behind_parent = true
+position = Vector2(0, -8)
+texture = ExtResource("5_tail")
+centered = false
+offset = Vector2(-7, 0)
+
+[node name="EmotionBubble" type="Sprite2D" parent="Sprite2D"]
+visible = false
+position = Vector2(0, -24)
+texture = ExtResource("6_emotes")
+hframes = 3
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position_smoothing_enabled = true
+position_smoothing_speed = 5.0
+
+[node name="InteractionZone" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 3
+position = Vector2(0, -6)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="InteractionZone"]
+shape = SubResource("CircleShape2D_zone")
+
+[node name="HandTarget" type="Node2D" parent="."]
+position = Vector2(14, -12)

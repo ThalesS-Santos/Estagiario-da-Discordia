@@ -38,6 +38,7 @@ var torch_on := true
 var wind := 1.0
 var night := 0.0
 var map_rect := Rect2(0, 0, 1280, 960)
+var navigation: VillageNavigation
 
 
 func _init() -> void:
@@ -52,6 +53,9 @@ func _init() -> void:
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_build()
+	navigation = VillageNavigation.new()
+	add_child(navigation)
+	navigation.build(self)
 
 
 # ------------------------------------------------------------------ fábrica de sprites

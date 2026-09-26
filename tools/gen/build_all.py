@@ -8,6 +8,7 @@ import env
 import layout as L
 import props
 import terrain
+import player_assets
 import ui_assets
 from common import OUT, rng, math
 
@@ -21,6 +22,7 @@ def main():
     meta.update(buildings.build_all())
     meta.update(props.build_all())
     meta.update(ui_assets.generate())
+    meta.update(player_assets.generate())
     for cid in chars.CHARS:
         meta[f"chars/{cid}"] = {"hframes": 4, "vframes": 3, "origin": [8, 23]}
     meta["chars/shadow"] = {"hframes": 1, "origin": [7, 2]}

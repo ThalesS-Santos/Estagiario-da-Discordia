@@ -1,8 +1,19 @@
 class_name NPC
-extends Node2D
+extends CharacterBody2D
 ## NPC com spritesheet pixel art (baixo/cima/lado x 4 frames), sombra, balão de fala e emotes.
 
 signal arrived
+
+@export var speed := 120.0
+@export var fear := 0
+@export var anger := 0
+@export var loyalty := 100
+@export var current_state := "IDLE"
+var navigation_agent: NavigationAgent2D
+var bubble_label: Label
+var bubble_tween: Tween
+var motion := Vector2.ZERO
+var stuck_time := 0.0
 
 const GEN := "res://assets/gen/"
 const EMOTES := {"!": 0, "?": 1, "<3": 2, "* *": 3, "...": 4, "zz": 5}
@@ -44,6 +55,10 @@ var _emotes: Texture2D
 func setup(npc_id: String, d: Dictionary, w) -> void:
 	id = npc_id
 	def = d
+	add_to_group("gossip_target")
+	fear = int(d.get("fear", 0))
+	anger = int(d.get("anger", 0))
+	loyalty = int(d.get("loyalty", 100))
 	world = w
 	decor = bool(d.get("decor", false))
 	if d.has("home_pos"):
@@ -59,6 +74,17 @@ func setup(npc_id: String, d: Dictionary, w) -> void:
 	if id == "npc_guard":
 		patrol = [Game.loc_pos("castle_gate") + Vector2(0, 14), Game.loc_pos("fountain") + Vector2(-60, 50), Game.loc_pos("well") + Vector2(0, 34)]
 	_build_sprites()
+	collision_layer = 2
+	collision_mask = 1
+	var collider := CollisionShape2D.new()
+	var circle := CircleShape2D.new()
+	circle.radius = 6.0
+	collider.shape = circle
+	add_child(collider)
+	navigation_agent = NavigationAgent2D.new()
+	navigation_agent.path_desired_distance = 4.0
+	navigation_agent.target_desired_distance = 6.0
+	add_child(navigation_agent)
 
 
 func _build_sprites() -> void:
@@ -86,6 +112,17 @@ func _build_sprites() -> void:
 	ui.npc = self
 	ui.z_index = 10
 	add_child(ui)
+	bubble_label = Label.new()
+	bubble_label.position = Vector2(-100, -118)
+	bubble_label.size = Vector2(200, 64)
+	bubble_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	bubble_label.add_theme_stylebox_override("normal", _bubble_box)
+	bubble_label.add_theme_color_override("font_color", Color(0.16, 0.12, 0.2))
+	bubble_label.add_theme_font_size_override("font_size", 13)
+	bubble_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bubble_label.z_index = 11
+	bubble_label.visible = false
+	add_child(bubble_label)
 
 
 class NpcUI extends Node2D:
@@ -99,8 +136,11 @@ func walk_to(p: Vector2, run := false) -> void:
 	if fallen:
 		return
 	target = p
+	navigation_agent.target_position = p
+	stuck_time = 0.0
 	moving = true
 	running = run
+	current_state = "RUN" if run else "WALK"
 	last_active = world.time if world else 0.0
 	if absf(p.x - position.x) > 2.0:
 		facing = signf(p.x - position.x)
@@ -109,6 +149,14 @@ func walk_to(p: Vector2, run := false) -> void:
 func say(text: String, dur := 3.5) -> void:
 	bubble = text
 	bubble_t = dur
+	bubble_label.text = text.left(AIContract.MAX_DIALOGUE)
+	bubble_label.visible = true
+	bubble_label.pivot_offset = Vector2(100, 64)
+	bubble_label.scale = Vector2.ZERO
+	if bubble_tween:
+		bubble_tween.kill()
+	bubble_tween = create_tween()
+	bubble_tween.tween_property(bubble_label, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK)
 	last_active = world.time if world else 0.0
 
 
@@ -149,23 +197,42 @@ func _pick_wander() -> Vector2:
 
 
 func _process(delta: float) -> void:
-	var sp := 1.0 if world == null or world.phase != 2 else float(Game.settings.sim_speed)
+	if world != null and (world.phase == 1 or world.get("ai_waiting") == true):
+		return
 	t += delta
 	bubble_t = maxf(bubble_t - delta, 0.0)
 	emote_t = maxf(emote_t - delta, 0.0)
 	mood_anger = maxf(mood_anger - delta * 0.05, 0.0)
 	mood_fear = maxf(mood_fear - delta * 0.05, 0.0)
-	var vel := Vector2.ZERO
+	bubble_label.visible = bubble_t > 0.0
+	_update_sprite(motion)
+	ui.queue_redraw()
+
+
+func _physics_process(delta: float) -> void:
+	if world != null and (world.phase == 1 or world.get("ai_waiting") == true):
+		return
+	var sp := 1.0 if world == null or world.phase != 2 else float(Game.settings.sim_speed)
+	motion = Vector2.ZERO
+	velocity = Vector2.ZERO
+	if world != null and not world.village.navigation.navigation_ready:
+		return
+	if NavigationServer2D.map_get_iteration_id(navigation_agent.get_navigation_map()) == 0:
+		return
 	if moving and not fallen:
-		var to := target - position
-		var step := (110.0 if running else 55.0) * delta * sp
-		if to.length() <= step + 1.0:
-			position = target
+		if navigation_agent.is_navigation_finished():
 			moving = false
-			arrived.emit()
+			if global_position.distance_to(target) < 16.0:
+				arrived.emit()
 		else:
-			vel = to.normalized()
-			position += vel * step
+			var next := navigation_agent.get_next_path_position()
+			motion = global_position.direction_to(next)
+			velocity = motion * minf(speed * (1.6 if running else 1.0) * sp, global_position.distance_to(next) / maxf(delta, 0.001))
+			var before := global_position
+			move_and_slide()
+			stuck_time = stuck_time + delta if global_position.distance_to(before) < 0.05 else 0.0
+			if stuck_time > 2.0:
+				moving = false
 		if running and world:
 			dust_t -= delta
 			if dust_t <= 0.0:
@@ -183,8 +250,33 @@ func _process(delta: float) -> void:
 				if not _in_water(dest):
 					walk_to(dest)
 	position = position.clamp(Vector2(10, 10), Game.MAP_SIZE - Vector2(10, 10))
-	_update_sprite(vel)
-	ui.queue_redraw()
+
+
+func apply_ai_directive(directive: Dictionary) -> void:
+	if directive.get("npc_id") != id:
+		return
+	fear = int(directive.fear_level)
+	anger = int(directive.anger_level)
+	loyalty = int(directive.loyalty_level)
+	var state: String = directive.new_state
+	get_up()
+	moving = false
+	var destination: String = directive.target_node_to_move
+	# Explicit registries only. Never resolve arbitrary model-provided NodePaths.
+	if world != null and world.has_method("get_ai_target"):
+		var target_node: Node2D = world.get_ai_target(destination)
+		if target_node != null:
+			walk_to(target_node.global_position, state == "RUN" or state == "AFRAID")
+	elif Game.LOCATIONS.has(destination):
+		walk_to(Game.loc_pos(destination), state == "RUN" or state == "AFRAID")
+	elif world != null and world.get("npcs") != null and world.npcs.has(destination):
+		walk_to(world.npcs[destination].global_position, state == "RUN")
+	current_state = state
+	if state == "FALLEN":
+		fall()
+	hurt_mood(float(anger) / 100.0, float(fear) / 100.0)
+	if directive.dialogue_bubble != "":
+		say(directive.dialogue_bubble, 4.0)
 
 
 func _update_sprite(vel: Vector2) -> void:
@@ -234,11 +326,3 @@ func draw_ui(c: CanvasItem) -> void:
 			c.draw_texture_rect_region(_emotes, Rect2(r.position + Vector2(2, 2), Vector2(24, 24)), Rect2(i * 12, 0, 12, 12))
 		else:
 			c.draw_string(font, r.position + Vector2(0, 19), emote, HORIZONTAL_ALIGNMENT_CENTER, 28, 14, Color(0.2, 0.15, 0.25))
-	if bubble_t > 0.0 and bubble != "":
-		var bw := 170.0
-		var lines := int(ceil(bubble.length() / 25.0))
-		var bh := 14.0 + lines * 14.0
-		var bp := Vector2(-bw / 2.0, -h - 22.0 - bh)
-		c.draw_style_box(_bubble_box, Rect2(bp, Vector2(bw, bh)))
-		c.draw_texture_rect(_tail, Rect2(Vector2(-6, bp.y + bh - 2), Vector2(12, 8)), false)
-		c.draw_multiline_string(font, bp + Vector2(8, 16), bubble, HORIZONTAL_ALIGNMENT_LEFT, bw - 16, 12, 8, Color(0.16, 0.12, 0.2))

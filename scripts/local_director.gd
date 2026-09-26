@@ -55,7 +55,7 @@ static func generate(p: Dictionary) -> Dictionary:
 	var n := actions.size()
 	var ambient_slots := 3 if (rumors > 0 or n == 0) else 0
 	for i in n:
-		var r := _action(actions[i], day, i * 20.0)
+		var r := _action(actions[i], day, i * 20.0, p.get("world_state", {}).get("npcs", {}))
 		var cap: int = maxi(4, int(float(budget - ambient_slots) / float(n)))
 		var ordered: Array = r.events
 		ordered.sort_custom(func(a, b): return a.t < b.t)
@@ -74,9 +74,9 @@ static func generate(p: Dictionary) -> Dictionary:
 	return {"events": events.slice(0, 12), "instability_delta": snappedf(delta, 0.1), "world_changes": wc}
 
 
-static func _action(a: Dictionary, day: int, t0: float) -> Dictionary:
+static func _action(a: Dictionary, day: int, t0: float, states: Dictionary = {}) -> Dictionary:
 	var narrative: String = str(a.get("narrative", "")).strip_edges()
-	var text := norm(narrative + " " + str(a.get("object_name", "")))
+	var text := norm(narrative)
 	var tags: Array = a.get("tags", [])
 	var loc: String = str(a.get("location", "open_field"))
 	var obj: String = str(a.get("object_id", ""))
@@ -138,8 +138,10 @@ static func _action(a: Dictionary, day: int, t0: float) -> Dictionary:
 		base += 6.0
 	if _any(text, ["envenen", "traic", "roub", "conspir", "mat", "sabot"]):
 		base += 5.0
-	var cred := float(Game.NPC_DEFS[target].cred) / 100.0
+	var state: Dictionary = states.get(target, Game.npc_state.get(target, Game.NPC_DEFS[target]))
+	var cred := float(state.get("credulity", state.get("cred", 50))) / 100.0
 	var delta := base * (0.6 + cred)
+	delta *= 1.0 + (float(state.get("anger", 0)) + float(state.get("fear", 0)) - float(state.get("loyalty", 50))) / 500.0
 	if (tags.has("sagrado") and target == "npc_priestess") or (tags.has("arma") and target == "npc_smith") or (tags.has("comida") and target == "npc_baker"):
 		delta *= 1.5
 	if loc == "castle_yard" or loc == "throne":

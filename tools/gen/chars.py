@@ -332,6 +332,23 @@ SCARF_SIDES = {"d": {6: "..OK........KO..", 7: "..OK........KO..", 8: "..OK.....
 CANE = {"d": {r: "...............w" for r in range(12, 24)}, "s": {r: "..w............." for r in range(13, 24)}}
 
 
+CLOAK_INTERN = {
+    "d": {
+        12: "...OMMAAAAMMO...", 13: "..OMMMAAAAMMMO..", 14: "..OMMMAARAMMMO..",
+        15: "..OMMAAARAAMMO..", 16: "..OSOAAARAAOSO..", 17: "...OOAAAAAAOO...",
+    },
+    "u": {
+        12: "...OMMMMMMMMO...", 13: "..OMMMMMMMMMMO..", 14: "..OMMMMMMMMMMO..",
+        15: "..OMMMMMMMMMMO..", 16: "..OMmMMMMMMmMO..", 17: "...OOMMMMMMOO...",
+        18: "....OmMMMMmO....",
+    },
+    "s": {
+        12: ".....OAAAAOM....", 13: "....OAAAAAAOMM..", 14: "....OAAaAAAOMMM.",
+        15: "....OAARAAAOMMM.", 16: "....OAOSOAAOMMM.", 17: "....OBBOBBBOMM..",
+        18: ".....OAAAAOMm...",
+    },
+}
+
 def base_pal(**over):
     p = {
         "O": C["out"], "E": C["black"], "S": C["skin"], "s": C["skin_d"],
@@ -378,6 +395,39 @@ CHARS = {
                      B=C["brown_d"], P=C["brown_d"], p=C["out"], F=C["out"], n=C["brown_l"], N=C["red"]),
         ov=[(HAT, "all", 0), (MUSTACHE, "ds", 0), (BACKPACK, "u", 0), (POUCH, "ds", 0)],
     ),
+    "player_intern": dict(
+        pal=base_pal(H=C["brown_d"], h=C["out"], A=C["white"], a=C["grey_l"], B=C["grey_d"],
+                     P=C["stone_dd"], p=C["out2"], F=C["black"], R=C["red"], M=C["brown"], m=C["brown_d"]),
+        head={
+        "s": [
+            "................",
+            "......OOOOOO....",
+            ".....OHHHHHHO...",
+            "....OHHHHHHHHO..",
+            "...OHHHHHHHHHO..",
+            "...OHhSSHHHHhO..",
+            "...OSSSSSSSHhO..",
+            "..OSSESSSSSHhO..",
+            "..OSSESSSSShO...",
+            ".OSSSSSSSSsO....",
+            "..OsSSSSSsO.....",
+            "...OOOOOOO......",
+        ],
+        },
+        body={
+        "s": [
+            ".....OAMMMMO....",
+            "....OAAMMMMMO...",
+            "....ORAMMMMMO...",
+            "....OAAMmMMMO...",
+            "....OSOMMmMMO...",
+            ".....OMMMMMO....",
+            ".....OAAAAO.....",
+        ],
+        },
+        crouch=True,
+        ov=[(CLOAK_INTERN, "du", 0)],
+    ),
     "npc_orphan": dict(
         pal=base_pal(H=C["orange"], h=C["red"], A=C["brown_l"], a=C["brown"], B=C["brown_d"],
                      P=C["brown"], p=C["brown_d"], F=C["skin_d"], L=C["leaf"], Q=C["blue_l"]),
@@ -415,8 +465,12 @@ def _scope_ok(scope, d):
     return base == "all" or d in base
 
 
-def build_frame(spec, d, f):
+def build_frame(spec, d, f, crouch=False):
     rows = compose(d, f, spec.get("dress", False))
+    if spec.get("head", {}).get(d):
+        rows[0:12] = spec["head"][d]
+    if spec.get("body", {}).get(d):
+        rows[12:19] = spec["body"][d]
     for ov, scope, dx in spec.get("ov", []):
         if not _scope_ok(scope, d):
             continue
@@ -430,6 +484,16 @@ def build_frame(spec, d, f):
     if spec.get("child"):
         rows = [r for i, r in enumerate(rows) if i not in (13, 18, 20)]
         rows = ["." * W] * 3 + rows
+    if crouch:
+        # agachado: 1 linha do tronco + 2 das pernas (mantém a cabeça inteira e as pernas legíveis)
+        rows = [r for i, r in enumerate(rows) if i not in (13, 20, 21)]
+        rows = ["." * W] * 3 + rows
+        if d == "d" and f in (0, 2):  # joelhos abertos
+            rows[-3:] = ["...OPPO....OPPO.", "...OFFO....OFFO.", "....OO......OO.."]
+        if d == "u" and f in (0, 2):
+            rows[-3:] = ["...OPPO....OPPO.", "...OFFO....OFFO.", "....OO......OO.."]
+        if d == "s":
+            rows[3:12] = [("." + r[:-1]) for r in rows[3:12]]  # tronco/cabeça 1px à frente
     pal = dict(spec["pal"])
     if d == "u" and "pal_u" in spec:
         pal.update(spec["pal_u"])
@@ -437,7 +501,11 @@ def build_frame(spec, d, f):
 
 
 def build_sheet(spec):
-    return grid([[build_frame(spec, d, f) for f in range(4)] for d in ("d", "u", "s")])
+    dirs = ("d", "u", "s")
+    rows = [[build_frame(spec, d, f) for f in range(4)] for d in dirs]
+    if spec.get("crouch"):
+        rows += [[build_frame(spec, d, f, True) for f in range(4)] for d in dirs]
+    return grid(rows)
 
 
 def shadow():
