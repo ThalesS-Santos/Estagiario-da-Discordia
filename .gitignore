@@ -22,3 +22,8 @@ desktop.ini
 .vscode/
 .idea/
 
+
+# Backend (Cloudflare Workers)
+backend/node_modules/
+backend/.wrangler/
+backend/.dev.vars

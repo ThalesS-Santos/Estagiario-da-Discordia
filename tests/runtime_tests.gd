@@ -9,6 +9,21 @@ var mock_body := ""
 var mock_status := 200
 var hold_response := false
 
+const WorldScript := preload("res://scripts/world.gd")
+const GeminiScript := preload("res://scripts/gemini_director.gd")
+
+class OfflineGemini extends GeminiScript:
+	func _ready() -> void:
+		api_key = "test-only-placeholder"
+		super._ready()
+
+	func _send_request(_url: String, _payload: String) -> Error:
+		return OK
+
+class TestWorld extends WorldScript:
+	func _create_gemini_director() -> GeminiDirector:
+		return OfflineGemini.new()
+
 
 func check(condition: bool, message: String) -> void:
 	assertions += 1
@@ -117,7 +132,8 @@ func _process(_delta: float) -> void:
 
 func _test_world() -> void:
 	Game.reset()
-	var world = load("res://scripts/world.gd").new()
+	var world := TestWorld.new()
+	world.ai_fallback_enabled = false
 	add_child(world)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
@@ -152,7 +168,10 @@ func _test_world() -> void:
 		get_viewport().get_texture().get_image().save_png("res://.godot/terminal_review.png")
 	world.hud._on_term_submit("O Rei mandou roubar o pão")
 	world.hud._on_term_submit("O Rei mandou roubar o pão")
+	var reply := {"candidates": [{"content": {"parts": [{"text": JSON.stringify(packet())}]}}]}
+	world.gemini_director._on_request_completed(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(), JSON.stringify(reply).to_utf8_buffer())
 	check(world.actions_today.size() == 1 and Game.ap == 1, "double submit cannot spend twice")
+	await world._finish_sim()
 	world.restart_day()
 	world.poisoned = true
 	world.fish_dead = true
@@ -174,13 +193,9 @@ func _test_world() -> void:
 	Game.persistence_enabled = false
 	# Verify the day boundary commits exactly once and checks victory first.
 	Game.reset()
-	world.sim_events.clear()
-	world.sim_idx = 0
-	world.sim_end = 100000.0
-	world.phase = world.Phase.SIM
-	world.sim_running = true
-	world.sim_delta = 10
-	world.sim_updates = packet().npc_updates
+	Game.set_instability(15)
+	Game.apply_npc_updates(packet().npc_updates)
+	world._start_simulation()
 	Engine.time_scale = 20.0
 	await world._finish_sim()
 	check(Game.day == 2 and Game.instability == 15, "round advances exactly one day")
@@ -191,18 +206,14 @@ func _test_world() -> void:
 	world.victory.connect(func(): endings.victory += 1)
 	world.defeat.connect(func(): endings.defeat += 1)
 	Game.day = Game.MAX_DAYS
-	Game.instability = 90
-	world.phase = world.Phase.SIM
-	world.sim_running = true
-	world.sim_delta = 10
+	Game.instability = 100
+	world._start_simulation()
 	await world._finish_sim()
 	check(endings.victory == 1 and endings.defeat == 0, "100 instability wins on final day")
 	check(world.crisis and not npc.is_physics_processing(), "victory disables agents after cutscene")
 	world.crisis = false
 	Game.instability = 20
-	world.phase = world.Phase.SIM
-	world.sim_running = true
-	world.sim_delta = 0
+	world._start_simulation()
 	await world._finish_sim()
 	check(endings.defeat == 1 and Game.day == 3, "final day below 100 loses without day overflow")
 	Engine.time_scale = 1.0

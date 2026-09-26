@@ -74,6 +74,48 @@ static func generate(p: Dictionary) -> Dictionary:
 	return {"events": events.slice(0, 12), "instability_delta": snappedf(delta, 0.1), "world_changes": wc}
 
 
+## Converte o roteiro local para o mesmo contrato do Gemini ({instability_delta, npc_updates}).
+## Usado como reserva quando o servidor de IA está indisponível, para o jogo nunca travar.
+static func ai_result(p: Dictionary, states: Dictionary, location_ids: Array) -> Dictionary:
+	var sim := generate(p)
+	var updates: Dictionary = {}
+	for e in sim.events:
+		var id: String = str(e.npc_id)
+		if not states.has(id):
+			continue
+		var st: Dictionary = states[id]
+		var u: Dictionary = updates.get(id, {"npc_id": id, "dialogue_bubble": "", "new_state": "IDLE", "target_node_to_move": "",
+			"fear_level": int(st.get("fear", 0)), "anger_level": int(st.get("anger", 0)), "loyalty_level": int(st.get("loyalty", 50))})
+		if u.dialogue_bubble == "" and str(e.dialogue) != "":
+			u.dialogue_bubble = str(e.dialogue).left(120)
+		match str(e.action):
+			"run_to", "flee":
+				u.new_state = "RUN"
+				u.fear_level = mini(int(u.fear_level) + 20, 100)
+			"shout", "attack":
+				u.new_state = "ANGRY"
+				u.anger_level = mini(int(u.anger_level) + 15, 100)
+			"talk_to":
+				if u.new_state != "ANGRY" and u.new_state != "RUN":
+					u.new_state = "TALK"
+			"fall_down":
+				u.new_state = "FALLEN"
+			"walk_to":
+				if u.new_state == "IDLE":
+					u.new_state = "WALK"
+		var target := str(e.target)
+		if u.target_node_to_move == "" and (location_ids.has(target) or (states.has(target) and target != id)):
+			u.target_node_to_move = target
+		updates[id] = u
+	if updates.is_empty() and not states.is_empty():
+		var first: String = states.keys()[0]
+		updates[first] = {"npc_id": first, "dialogue_bubble": "Que coisa estranha...", "new_state": "TALK", "target_node_to_move": "",
+			"fear_level": int(states[first].get("fear", 0)), "anger_level": int(states[first].get("anger", 0)),
+			"loyalty_level": int(states[first].get("loyalty", 50))}
+	return {"schema_version": 1, "instability_delta": clampi(int(round(float(sim.instability_delta))), -20, 45),
+		"npc_updates": updates.values().slice(0, 12)}
+
+
 static func _action(a: Dictionary, day: int, t0: float, states: Dictionary = {}) -> Dictionary:
 	var narrative: String = str(a.get("narrative", "")).strip_edges()
 	var text := norm(narrative)

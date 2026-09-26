@@ -1,0 +1,2 @@
+# Copie para .dev.vars (ignorado pelo git) para rodar localmente com `npm run dev`
+GEMINI_API_KEY=cole-sua-chave-aqui

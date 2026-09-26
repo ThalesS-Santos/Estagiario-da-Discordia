@@ -1,14 +1,16 @@
 class_name GeminiDirector
 extends Node
-## Direct Gemini REST client. Attach to a Node and connect the two signals.
-## Set GEMINI_API_KEY in the local environment or assign api_key at runtime.
-## Never serialize a developer API key into a scene or a distributed build.
+## Cliente do Diretor de Cena. Dois modos:
+##  - BACKEND (produção): game/ai/backend_url (Project Settings) ou PARADOXO_BACKEND_URL. A chave do Gemini
+##    fica só no servidor (ver backend/). É o modo do executável distribuído.
+##  - DIRETO (desenvolvimento): sem backend_url, usa GEMINI_API_KEY do ambiente ou api_key em runtime.
+## Nunca serialize uma chave em cena, código ou build distribuído.
 
 signal butterfly_effect_calculated(data: Dictionary)
 signal ai_error(error_message: String)
 
 ## Requested legacy model; retired by Google. Select an available model to run.
-@export var model_name := "gemini-1.5-flash"
+@export var model_name := "gemini-2.5-flash"
 @export var allowed_locations: PackedStringArray = [
 	"throne", "castle_gate", "castle_yard", "fountain", "plaza", "well",
 	"notice_board", "stall", "bakery", "residence", "forge", "temple",
@@ -17,6 +19,7 @@ signal ai_error(error_message: String)
 
 const API_ROOT := "https://generativelanguage.googleapis.com/v1beta/models/"
 const TIMEOUT_SECONDS := 15.0
+const BACKEND_TIMEOUT_SECONDS := 25.0
 const MAX_BODY_BYTES := 65536
 const STATES := ["IDLE", "WALK", "RUN", "AFRAID", "ANGRY", "TALK", "FALLEN"]
 const SYSTEM_PROMPT := """
@@ -45,6 +48,11 @@ var _http: HTTPRequest
 var _request_id := 0
 var _npc_ids: Array = []
 var _location_ids: PackedStringArray = []
+var backend_url := ""
+var _using_backend := false
+var _retries_left := 0
+var _last_url := ""
+var _last_payload := ""
 
 
 func _ready() -> void:
@@ -60,18 +68,33 @@ func _ready() -> void:
 	_http.request_completed.connect(_on_request_completed)
 	if api_key.is_empty():
 		api_key = OS.get_environment("GEMINI_API_KEY").strip_edges()
+	backend_url = str(ProjectSettings.get_setting("game/ai/backend_url", "")).strip_edges().trim_suffix("/")
+	if OS.has_environment("PARADOXO_BACKEND_URL"):
+		backend_url = OS.get_environment("PARADOXO_BACKEND_URL").strip_edges().trim_suffix("/")
 
 
-func evaluate_butterfly_effect(player_action: String, gossip: String, npcs_state: Dictionary) -> void:
+func _backend_url_valid() -> bool:
+	if backend_url.begins_with("https://"):
+		return true
+	var loopback := RegEx.new()
+	loopback.compile("^http://(127\\.0\\.0\\.1|localhost):[0-9]{1,5}$")
+	return loopback.search(backend_url) != null
+
+
+func evaluate_butterfly_effect(player_action: String, gossip: String, npcs_state: Dictionary, context: Dictionary = {}) -> void:
 	if is_processing:
 		return # Ignore double-clicks without resetting the in-flight UI state.
 	if not is_node_ready() or not is_instance_valid(_http):
 		ai_error.emit("O diretor Gemini ainda não está pronto.")
 		return
-	if api_key.strip_edges().is_empty():
+	_using_backend = backend_url != ""
+	if _using_backend and not _backend_url_valid():
+		ai_error.emit("Endereço do servidor de IA inválido.")
+		return
+	if not _using_backend and api_key.strip_edges().is_empty():
 		ai_error.emit("Configure GEMINI_API_KEY ou atribua api_key em tempo de execução.")
 		return
-	if model_name.is_empty() or model_name.contains("/") or model_name.contains("?"):
+	if not _using_backend and (model_name.is_empty() or model_name.contains("/") or model_name.contains("?")):
 		ai_error.emit("Nome de modelo Gemini inválido.")
 		return
 	if player_action.length() > 2000 or gossip.length() > 240 or npcs_state.is_empty() or npcs_state.size() > 64:
@@ -81,7 +104,8 @@ func evaluate_butterfly_effect(player_action: String, gossip: String, npcs_state
 		if typeof(npc_id) != TYPE_STRING or typeof(npcs_state[npc_id]) != TYPE_DICTIONARY:
 			ai_error.emit("O estado deve ser um dicionário de IDs de NPC para atributos.")
 			return
-	var payload := _build_payload(player_action, gossip, npcs_state)
+	var payload := _build_backend_payload(player_action, gossip, npcs_state, context) if _using_backend \
+		else _build_payload(player_action, gossip, npcs_state, context)
 	var serialized := JSON.stringify(payload)
 	if serialized.to_utf8_buffer().size() > MAX_BODY_BYTES:
 		ai_error.emit("O estado enviado ao Gemini é muito grande.")
@@ -91,21 +115,30 @@ func evaluate_butterfly_effect(player_action: String, gossip: String, npcs_state
 	_request_id += 1
 	var request_id := _request_id
 	is_processing = true
-	var url := API_ROOT + model_name.uri_encode() + ":generateContent?key=" + api_key.uri_encode()
+	var url := backend_url + "/simulate" if _using_backend \
+		else API_ROOT + model_name.uri_encode() + ":generateContent?key=" + api_key.uri_encode()
+	_last_url = url
+	_last_payload = serialized
+	_retries_left = 1 if _using_backend else 0
 	var error := _send_request(url, serialized)
 	if error != OK:
 		_fail("Não foi possível iniciar a requisição ao Gemini (erro %d)." % error)
 		return
 	# Wall-clock deadline: works even while paused or using fast simulation speed.
-	get_tree().create_timer(TIMEOUT_SECONDS, true, false, true).timeout.connect(
+	get_tree().create_timer(BACKEND_TIMEOUT_SECONDS if _using_backend else TIMEOUT_SECONDS, true, false, true).timeout.connect(
 		_on_timeout.bind(request_id), CONNECT_ONE_SHOT)
 
 
-func _build_payload(player_action: String, gossip: String, npcs_state: Dictionary) -> Dictionary:
+func _build_backend_payload(player_action: String, gossip: String, npcs_state: Dictionary, context: Dictionary) -> Dictionary:
+	# O servidor tem seu próprio prompt, dossiê e IDs; o cliente só envia dados de jogo.
+	return {"player_action": player_action, "gossip": gossip, "npcs_state": npcs_state, "context": context}
+
+
+func _build_payload(player_action: String, gossip: String, npcs_state: Dictionary, context: Dictionary = {}) -> Dictionary:
 	return {
 		"system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
 		"contents": [{"role": "user", "parts": [{"text": JSON.stringify({
-			"player_action": player_action, "gossip": gossip, "npcs_state": npcs_state,
+			"context": context, "player_action": player_action, "gossip": gossip, "npcs_state": npcs_state,
 			"allowed_locations": Array(allowed_locations),
 		})}]}],
 		"generationConfig": {"response_mime_type": "application/json"},
@@ -117,24 +150,38 @@ func _send_request(url: String, payload: String) -> Error:
 	return _http.request(url, ["Content-Type: application/json"], HTTPClient.METHOD_POST, payload)
 
 
+func _retry_transport() -> bool:
+	# Uma nova tentativa automática só para falhas de rede no modo backend (ex.: Worker frio).
+	if _retries_left <= 0 or _last_url == "":
+		return false
+	_retries_left -= 1
+	return _send_request(_last_url, _last_payload) == OK
+
+
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	if not is_processing:
 		return
 	if result != HTTPRequest.RESULT_SUCCESS:
+		if _using_backend and _retry_transport():
+			return
 		_fail("Falha de transporte ao acessar o Gemini (erro %d)." % result)
 		return
 	if response_code != 200:
-		_fail("Gemini retornou HTTP %d. Verifique chave, quota e disponibilidade do modelo." % response_code)
+		_fail("A IA retornou HTTP %d. Verifique chave, quota e disponibilidade do modelo." % response_code)
 		return
 	if body.size() > MAX_BODY_BYTES:
 		_fail("Resposta do Gemini excedeu o tamanho permitido.")
 		return
-	var envelope: Variant = JSON.parse_string(body.get_string_from_utf8())
-	var text := _extract_text(envelope)
-	if text.is_empty():
-		_fail("Gemini não retornou texto completo; a resposta pode ter sido bloqueada ou interrompida.")
-		return
-	var parsed: Variant = JSON.parse_string(text)
+	var parsed: Variant
+	if _using_backend:
+		parsed = JSON.parse_string(body.get_string_from_utf8()) # o servidor já devolve o efeito pronto
+	else:
+		var envelope: Variant = JSON.parse_string(body.get_string_from_utf8())
+		var text := _extract_text(envelope)
+		if text.is_empty():
+			_fail("Gemini não retornou texto completo; a resposta pode ter sido bloqueada ou interrompida.")
+			return
+		parsed = JSON.parse_string(text)
 	var validated := _validate_effect(parsed)
 	if validated.is_empty():
 		_fail("Gemini retornou JSON inválido ou fora do contrato de npc_updates.")

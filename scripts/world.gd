@@ -11,6 +11,7 @@ const HudScript := preload("res://scripts/hud.gd")
 const GeminiScript := preload("res://scripts/gemini_director.gd")
 
 var gemini_director: GeminiDirector
+var ai_fallback_enabled := true ## se a IA falhar, usa o Diretor local para o jogo nunca travar
 var ai_waiting := false
 var pending_gossip := {}
 var location_nodes := {}
@@ -53,8 +54,6 @@ var sim_events: Array = []
 var sim_time := 0.0
 var sim_idx := 0
 var sim_end := 0.0
-var sim_delta := 0.0
-var sim_updates: Array = []
 var crisis := false
 var day_revision := 0
 var sim_running := false
@@ -210,7 +209,8 @@ func _request_caos(narrative: String) -> void:
 	hud.close_terminal()
 	hud.set_sim(true)
 	hud.set_loading(true) # Must precede evaluate: local validation can fail synchronously.
-	gemini_director.evaluate_butterfly_effect(action, narrative, states)
+	gemini_director.evaluate_butterfly_effect(action, narrative, states,
+		{"day": Game.day, "instability": Game.instability, "rumors": Game.rumors})
 
 
 func _on_caos_gerado(data: Dictionary) -> void:
@@ -258,8 +258,25 @@ func _on_caos_gerado(data: Dictionary) -> void:
 	Sfx.play("tension")
 
 
+func _local_ai_result() -> Dictionary:
+	var action := {"narrative": str(pending_gossip.get("text", "")), "tags": [], "object_id": "", "object_name": "Sussurro"}
+	if held:
+		action.merge({"tags": held.def.tags, "object_id": held.id, "object_name": held.def.name,
+			"location": Game.nearest_location(drop_pos)}, true)
+	elif gossip_npc:
+		action["location"] = Game.nearest_location(gossip_npc.position)
+	var states := _live_npc_states()
+	var payload := {"actions": [action], "world_state": {"npcs": states}, "day": Game.day, "rumors": Game.rumors}
+	return LocalDirector.ai_result(payload, states, Game.LOCATIONS.keys())
+
+
 func _on_gemini_error(message: String) -> void:
 	if not ai_waiting or not is_inside_tree():
+		return
+	if ai_fallback_enabled and not pending_gossip.is_empty():
+		push_warning("IA indisponível (%s). Usando o Diretor local." % message)
+		hud.toast("IA offline: usando o modo local.", 3.0)
+		_on_caos_gerado(_local_ai_result())
 		return
 	var text: String = pending_gossip.get("text", "")
 	ai_waiting = false
@@ -629,6 +646,9 @@ func _start_simulation() -> void:
 	# End-day is now only a time transition; each action was already sent to Gemini.
 	phase = Phase.SIM
 	_ending_day = true
+	for npc: NPC in _ai_actors().values():
+		npc.ambient = false
+		npc.moving = false
 	sim_events.clear()
 	sim_idx = 0
 	sim_time = 0.0

@@ -1,5 +1,10 @@
 # Integração de IA e preparação para publicação
 
+> Arquitetura alternativa preservada como referência. A partida agora usa
+> Gemini diretamente, conectada ao HUD e aos NPCs. Consulte
+> [GEMINI_DIRECT.md](GEMINI_DIRECT.md) para o fluxo ativo. Os parágrafos abaixo
+> descrevem o diretor de backend anterior, não a configuração atual do mundo.
+
 O runtime usa `HTTPRequest` nativo. `addons/godot_ai` é uma ponte MCP de
 desenvolvimento para o editor, não um cliente de inferência para jogadores.
 O provedor de referência é Gemini. Nenhuma chave ou chamada direta ao Google
