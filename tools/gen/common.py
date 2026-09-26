@@ -126,7 +126,7 @@ def from_ascii(rows, pal, w=None):
     w = w or max(len(r) for r in rows)
     img = new(w, len(rows))
     for y, r in enumerate(rows):
-        for x, ch in enumerate(r):
+        for x, ch in enumerate(r[:w]):
             if ch in pal and pal[ch] is not None:
                 img.putpixel((x, y), pal[ch])
     return img

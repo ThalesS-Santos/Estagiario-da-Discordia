@@ -9,10 +9,11 @@ addons/.godot_ai_update/
 __pycache__/
 *.py[cod]
 *$py.class
-venv/
-.venv/
-env/
+/venv/
+/.venv/
+/env/
 .env
+.env.*
 
 # OS & Editor files
 .DS_Store

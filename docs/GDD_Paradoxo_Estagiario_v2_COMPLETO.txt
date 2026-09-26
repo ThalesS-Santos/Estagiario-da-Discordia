@@ -1,4 +1,4 @@
-﻿O PARADOXO DO ESTAGIÁRIO
+O PARADOXO DO ESTAGIÁRIO
 Game Design Document Completo
 Game Jam CIMATEC 2026.2 — Tema: Efeito Borboleta
 "Pequenas Ações, Grandes Consequências"

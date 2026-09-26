@@ -10,22 +10,23 @@ const AP_PER_DAY := 3
 const SAVE_PATH := "user://save.json"
 const SETTINGS_PATH := "user://settings.cfg"
 
+## posições batem com tools/gen/layout.py (mapa gerado)
 var LOCATIONS := {
-	"throne": {"name": "Sala do Trono", "pos": Vector2(640, 110)},
-	"castle_gate": {"name": "Portão do Castelo", "pos": Vector2(640, 215)},
-	"castle_yard": {"name": "Pátio do Castelo", "pos": Vector2(640, 262)},
-	"fountain": {"name": "Fonte da Praça", "pos": Vector2(640, 400)},
-	"plaza": {"name": "Praça", "pos": Vector2(620, 462)},
-	"well": {"name": "Poço", "pos": Vector2(555, 415)},
-	"notice_board": {"name": "Poste de Decretos", "pos": Vector2(725, 375)},
-	"stall": {"name": "Banca do Mercador", "pos": Vector2(705, 458)},
-	"bakery": {"name": "Padaria", "pos": Vector2(300, 440)},
-	"residence": {"name": "Residências", "pos": Vector2(120, 440)},
-	"forge": {"name": "Ferraria", "pos": Vector2(960, 440)},
-	"temple": {"name": "Templo", "pos": Vector2(210, 720)},
-	"lake": {"name": "Lago", "pos": Vector2(700, 800)},
-	"forest": {"name": "Floresta", "pos": Vector2(1100, 170)},
-	"road_south": {"name": "Estrada Sul", "pos": Vector2(640, 945)},
+	"throne": {"name": "Sala do Trono", "pos": Vector2(640, 86)},
+	"castle_gate": {"name": "Portão do Castelo", "pos": Vector2(640, 238)},
+	"castle_yard": {"name": "Pátio do Castelo", "pos": Vector2(640, 284)},
+	"fountain": {"name": "Fonte da Praça", "pos": Vector2(640, 404)},
+	"plaza": {"name": "Praça", "pos": Vector2(604, 474)},
+	"well": {"name": "Poço", "pos": Vector2(548, 392)},
+	"notice_board": {"name": "Poste de Decretos", "pos": Vector2(732, 360)},
+	"stall": {"name": "Banca do Mercador", "pos": Vector2(716, 464)},
+	"bakery": {"name": "Padaria", "pos": Vector2(304, 440)},
+	"residence": {"name": "Residências", "pos": Vector2(112, 440)},
+	"forge": {"name": "Ferraria", "pos": Vector2(968, 440)},
+	"temple": {"name": "Templo", "pos": Vector2(224, 728)},
+	"lake": {"name": "Lago", "pos": Vector2(880, 694)},
+	"forest": {"name": "Floresta", "pos": Vector2(1130, 170)},
+	"road_south": {"name": "Estrada Sul", "pos": Vector2(640, 944)},
 }
 
 var NPC_DEFS := {

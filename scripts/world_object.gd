@@ -1,6 +1,9 @@
 class_name WorldObject
 extends Node2D
-## Objeto carregável do mapa.
+## Objeto carregável do mapa, desenhado com o ícone pixel art de assets/gen/props/items.png.
+
+const GEN := "res://assets/gen/"
+static var _names: Array = []
 
 var id := ""
 var def: Dictionary = {}
@@ -10,12 +13,43 @@ var t := 0.0
 var trail: Array = []
 var attached_to = null
 
+var icon: Sprite2D
+var ring: AnimSprite
+var shadow: Sprite2D
+
 
 func setup(obj_id: String, d: Dictionary, pos: Vector2) -> void:
 	id = obj_id
 	def = d
 	position = pos
 	t = randf() * 6.0
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	if _names.is_empty():
+		var f := FileAccess.open(GEN + "map.json", FileAccess.READ)
+		var parsed = JSON.parse_string(f.get_as_text()) if f else null
+		if typeof(parsed) == TYPE_DICTIONARY:
+			_names = parsed.meta["props/items"].names
+	shadow = Sprite2D.new()
+	shadow.texture = load(GEN + "chars/shadow.png")
+	shadow.scale = Vector2(1.4, 1.6)
+	shadow.modulate = Color(1, 1, 1, 0.8)
+	add_child(shadow)
+	ring = AnimSprite.new()
+	ring.texture = load(GEN + "props/select_ring.png")
+	ring.hframes = 4
+	ring.fps = 8.0
+	ring.scale = Vector2(2, 2)
+	ring.visible = false
+	add_child(ring)
+	icon = Sprite2D.new()
+	icon.texture = load(GEN + "props/items.png")
+	icon.hframes = maxi(_names.size(), 1)
+	var idx := _names.find(id)
+	icon.frame = maxi(idx, 0)
+	icon.centered = false
+	icon.offset = Vector2(-8, -13)
+	icon.scale = Vector2(2, 2)
+	add_child(icon)
 
 
 func display_tags() -> Array:
@@ -43,20 +77,21 @@ func _process(delta: float) -> void:
 		trail.pop_front()
 	if attached_to:
 		position = attached_to.position + Vector2(10 * attached_to.facing, -18)
+	var bob := sin(t * 3.0) * 3.0 if held else sin(t * 2.0) * 0.8
+	icon.position = Vector2(0, bob - (10.0 if held else 0.0))
+	icon.scale = Vector2(2.3, 2.3) if (held or hovered) else Vector2(2, 2)
+	ring.visible = hovered or held
+	ring.modulate = Game.tag_color(def.tags) if held else Color.WHITE
+	shadow.visible = attached_to == null
+	shadow.scale = Vector2(1.1, 1.3) if held else Vector2(1.4, 1.6)
+	z_index = 4 if held else 0
 	queue_redraw()
 
 
 func _draw() -> void:
+	if trail.is_empty():
+		return
 	var c: Color = Game.tag_color(def.tags)
-	var bob := sin(t * 3.0) * 3.0 if held else 0.0
 	for i in trail.size():
-		var p: Vector2 = to_local(trail[i]) + Vector2(0, bob)
-		draw_circle(p, 1.0 + i * 0.25, Color(c, 0.08 + i * 0.05))
-	if held:
-		draw_circle(Vector2(0, bob), 16, Color(c, 0.18))
-	elif hovered:
-		draw_circle(Vector2.ZERO, 14, Color(c, 0.3))
-	var pulse := 0.5 + 0.5 * sin(t * 2.0)
-	draw_rect(Rect2(-6, -6 + bob, 12, 12), c)
-	draw_rect(Rect2(-6, -6 + bob, 12, 12), Color(0, 0, 0, 0.7), false, 1.0)
-	draw_rect(Rect2(-2, -4 + bob, 3, 3), Color(1, 1, 1, 0.4 + 0.3 * pulse))
+		var p: Vector2 = to_local(trail[i]) + Vector2(0, -12)
+		draw_rect(Rect2(p - Vector2(1, 1) * (1 + i * 0.3), Vector2(2, 2) * (1 + i * 0.3)), Color(c, 0.1 + i * 0.06))

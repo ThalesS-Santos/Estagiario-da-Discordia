@@ -56,7 +56,7 @@ static func generate(p: Dictionary) -> Dictionary:
 	var ambient_slots := 3 if (rumors > 0 or n == 0) else 0
 	for i in n:
 		var r := _action(actions[i], day, i * 20.0)
-		var cap: int = maxi(4, (budget - ambient_slots) / n)
+		var cap: int = maxi(4, int(float(budget - ambient_slots) / float(n)))
 		var ordered: Array = r.events
 		ordered.sort_custom(func(a, b): return a.t < b.t)
 		events.append_array(ordered.slice(0, cap))

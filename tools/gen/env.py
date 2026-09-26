@@ -185,7 +185,6 @@ def reeds():
                 put(img, tx + 1, y, C["brown_d"])
         for bx in (1, 5, 8, 11):
             vline(img, bx, 15, 19, C["grass_d"])
-        outline(img)
         frames.append(img)
     return hstrip(frames)
 
@@ -209,18 +208,22 @@ def flowers():
 
 
 def crops():
+    """Canteiro 16x16: terra arada com dois repolhos que balançam as folhas."""
     frames = []
     for s in (0, 1, 0, -1):
         img = new(16, 16)
-        for row in range(3):
-            y0 = 4 + row * 5
-            hline(img, 0, 15, y0 + 3, C["dirt_d"])
-            hline(img, 0, 15, y0 + 4, C["wood_d"])
-            for x in range(1, 16, 3):
-                for h in range(4):
-                    off = s if h >= 2 else 0
-                    put(img, x + off, y0 + 2 - h, C["leaf"] if h < 2 else C["leaf_h"])
-                put(img, x + s, y0 - 2, C["yellow"])
+        rect(img, 0, 0, 16, 16, C["dirt_d"])
+        for y in (3, 11):
+            hline(img, 0, 15, y, C["wood_d"])
+            hline(img, 0, 15, y + 1, C["dirt"])
+        for cx, cy in ((4, 6), (12, 6), (4, 14), (12, 14)):
+            leaves = new(16, 16)
+            disc(leaves, cx, cy - 1, 3.2, C["leaf"])
+            disc(leaves, cx - 1, cy - 2, 1.8, C["leaf_h"])
+            put(leaves, cx - 3 + s, cy - 4, C["leaf_h"])
+            put(leaves, cx + 3 + s, cy - 4, C["leaf_h"])
+            outline(leaves)
+            img.alpha_composite(leaves)
         frames.append(img)
     return hstrip(frames)
 
@@ -252,17 +255,17 @@ def build_all():
         fw = img.width // frames
         meta[f"env/{name}"] = {"hframes": frames, "origin": origin or [fw // 2, img.height - 2], "fps": fps}
 
-    oak_blobs = [(16, 13, 9), (9, 19, 7), (23, 19, 7), (16, 22, 8), (10, 11, 6), (22, 11, 6), (7, 25, 5), (25, 25, 5),
-                 (16, 7, 6)]
-    reg("tree_oak", round_tree(32, 48, oak_blobs, 6, 30, 1), 4, [16, 46], 2.5)
-    reg("tree_oak_dark", round_tree(32, 48, oak_blobs, 6, 30, 2, DARKGREEN), 4, [16, 46], 2.5)
-    reg("tree_oak_autumn", round_tree(32, 48, oak_blobs, 6, 30, 3, AUTUMN), 4, [16, 46], 2.5)
-    reg("tree_apple", round_tree(32, 48, oak_blobs, 6, 30, 4, None, ("red", 9)), 4, [16, 46], 2.5)
-    reg("tree_blossom", round_tree(32, 48, oak_blobs, 6, 30, 5, PINK), 4, [16, 46], 2.5)
-    big_blobs = [(24, 16, 12), (13, 24, 10), (35, 24, 10), (24, 29, 11), (14, 13, 8), (34, 13, 8), (24, 8, 8),
-                 (8, 32, 6), (40, 32, 6), (20, 36, 7), (30, 36, 7)]
-    reg("tree_huge", round_tree(48, 64, big_blobs, 9, 42, 6), 4, [24, 62], 2.0)
-    reg("tree_huge_dark", round_tree(48, 64, big_blobs, 9, 42, 7, DARKGREEN), 4, [24, 62], 2.0)
+    oak_blobs = [(16, 17, 9), (9, 23, 7), (23, 23, 7), (16, 27, 8), (10, 15, 6), (22, 15, 6), (7, 29, 5), (25, 29, 5),
+                 (16, 10, 7)]
+    reg("tree_oak", round_tree(32, 48, oak_blobs, 6, 35, 1), 4, [16, 46], 2.5)
+    reg("tree_oak_dark", round_tree(32, 48, oak_blobs, 6, 35, 2, DARKGREEN), 4, [16, 46], 2.5)
+    reg("tree_oak_autumn", round_tree(32, 48, oak_blobs, 6, 35, 3, AUTUMN), 4, [16, 46], 2.5)
+    reg("tree_apple", round_tree(32, 48, oak_blobs, 6, 35, 4, None, ("red", 9)), 4, [16, 46], 2.5)
+    reg("tree_blossom", round_tree(32, 48, oak_blobs, 6, 35, 5, PINK), 4, [16, 46], 2.5)
+    big_blobs = [(24, 20, 12), (13, 28, 10), (35, 28, 10), (24, 33, 11), (14, 17, 8), (34, 17, 8), (24, 11, 9),
+                 (8, 36, 6), (40, 36, 6), (20, 40, 7), (30, 40, 7)]
+    reg("tree_huge", round_tree(48, 64, big_blobs, 9, 47, 6), 4, [24, 62], 2.0)
+    reg("tree_huge_dark", round_tree(48, 64, big_blobs, 9, 47, 7, DARKGREEN), 4, [24, 62], 2.0)
     pine_t = [(2, 14, 5), (9, 24, 8), (17, 34, 10), (25, 41, 11)]
     reg("tree_pine", pine(24, 50, pine_t, 8), 4, [12, 48], 2.5)
     reg("tree_pine_dark", pine(24, 50, pine_t, 9, DARKGREEN), 4, [12, 48], 2.5)
