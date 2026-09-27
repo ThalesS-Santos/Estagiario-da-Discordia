@@ -241,7 +241,7 @@ func _ready() -> void:
 	flash_rect.color = Color(1, 1, 1, 0)
 	flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fl.add_child(flash_rect)
-	show_loading()
+	show_menu()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -468,10 +468,9 @@ func show_name_entry() -> void:
 
 
 func start_game(new_game: bool) -> void:
-	_new_screen()
+	_show_game_loading()
+	await get_tree().process_frame
 	_clear_menu_backdrop()
-	screen.queue_free()
-	screen = null
 	world = WorldScript.new()
 	world.tutorial = new_game
 	world.victory.connect(show_victory)
@@ -480,6 +479,21 @@ func start_game(new_game: bool) -> void:
 		_flash()
 		show_menu())
 	add_child(world)
+	_flash()
+	if screen:
+		screen.queue_free()
+		screen = null
+
+
+func _show_game_loading() -> void:
+	var s := _new_screen()
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.85)
+	s.add_child(dim)
+	var anim := ButterflyEffectLoading.new()
+	anim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	s.add_child(anim)
 
 
 func show_credits() -> void:
