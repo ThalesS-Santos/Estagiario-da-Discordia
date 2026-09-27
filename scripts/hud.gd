@@ -620,9 +620,134 @@ func update_chain_panel(events: Array) -> void:
 
 # ---- API pública da missão -------------------------------------------------
 func show_mission_briefing() -> void:
+	mission_panel.visible = false
+	_show_briefing_overlay()
+
+
+func _show_briefing_overlay() -> void:
+	# Overlay escuro com card central — lore + objetivo + ferramentas
+	var overlay := ColorRect.new()
+	overlay.color = Color(0.0, 0.0, 0.02, 0.0)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.z_index = 50
+	add_child(overlay)
+
+	# Card central
+	var card := ColorRect.new()
+	card.color = Color(0.04, 0.06, 0.10, 0.95)
+	card.size = Vector2(700, 380)
+	card.position = Vector2(290, 170)
+	overlay.add_child(card)
+
+	# Borda dourada (linha superior)
+	var border_top := ColorRect.new()
+	border_top.color = Color(0.80, 0.65, 0.20, 1.0)
+	border_top.size = Vector2(700, 3)
+	border_top.position = Vector2(0, 0)
+	card.add_child(border_top)
+	var border_bot := ColorRect.new()
+	border_bot.color = Color(0.80, 0.65, 0.20, 1.0)
+	border_bot.size = Vector2(700, 3)
+	border_bot.position = Vector2(0, 377)
+	card.add_child(border_bot)
+
+	# Cabeçalho
+	var header := Label.new()
+	header.text = "▶ TRANSMISSÃO: AGÊNCIA PANÓPTICO"
+	header.position = Vector2(24, 18)
+	header.add_theme_font_size_override("font_size", 13)
+	header.add_theme_color_override("font_color", Color(0.80, 0.65, 0.20))
+	card.add_child(header)
+
+	var divider := ColorRect.new()
+	divider.color = Color(0.25, 0.30, 0.40, 1.0)
+	divider.size = Vector2(652, 1)
+	divider.position = Vector2(24, 40)
+	card.add_child(divider)
+
+	# Corpo de texto (typewriter)
+	var body := RichTextLabel.new()
+	body.bbcode_enabled = true
+	body.size = Vector2(652, 270)
+	body.position = Vector2(24, 52)
+	body.add_theme_font_size_override("normal_font_size", 13)
+	body.add_theme_color_override("default_color", Color(0.85, 0.90, 0.85))
+	body.scroll_active = false
+	card.add_child(body)
+
+	# Rodapé
+	var footer := Label.new()
+	footer.text = "[ ESPAÇO ou CLIQUE para continuar ]"
+	footer.position = Vector2(24, 338)
+	footer.add_theme_font_size_override("font_size", 11)
+	footer.add_theme_color_override("font_color", Color(0.45, 0.55, 0.50))
+	card.add_child(footer)
+
+	# Slides de conteúdo
+	var slides: Array[String] = [
+		"[b]OPERAÇÃO:[/b] [color=#c8a028]EFEITO BORBOLETA[/color]  ·  Ref. 14.7-F / Linha Alfa-3\n\n[b]ANOMALIA DETECTADA:[/b]\nO Rei Aldemar I governa esta aldeia com mão de ferro.\nProjeção da Agência: em 30 dias ele declarará guerra aos reinos vizinhos.\nA região inteira será destruída.\n\nSua presença aqui já alterou a linha do tempo.\n[i]O que você fizer com os próximos 3 dias é o que importa.[/i]",
+		"[b]ALVO:[/b] [color=#e06060]REI ALDEMAR I[/color]  —  Castelo ao Norte\n\n[b]COMO REMOVÊ-LO:[/b]\nNão pela força — isso criaria um mártir.\nNão pela fuga — ele voltaria com exército.\n\n[color=#80c080]Instabilidade Social[/color] é sua arma.\nQuando a população perder a fé no rei [b](Instabilidade ≥ 100)[/b],\nela própria o derruba. Sua missão: chegar lá em [b]3 dias[/b].",
+		"[b]SUAS FERRAMENTAS:[/b]\n\n[color=#80b0e0]● Pegar objeto (clique)[/color]  —  mova coisas pelo mapa, custos 1 PA\n[color=#80b0e0]● Soltar com narrativa (clique)[/color]  —  escreva o boato, 1 PA\n[color=#80b0e0]● Sussurrar para NPC (clique)[/color]  —  posicione-se atrás, 1 PA\n\nVocê tem [b]3 PA por dia[/b]. Gaste bem.\n\n[color=#a0a040]Atenção:[/color] Guardas que te vejam agem suspeitos.\nSe a perseguição começar — corra."
+	]
+
+	# Fade in do overlay
+	var tw_in := create_tween()
+	tw_in.tween_property(overlay, "color:a", 0.88, 0.3)
+	await tw_in.finished
+
+	var slide_idx := 0
+	var skip := false
+	var dismiss := false
+
+	# Input para pular
+	var inp := ColorRect.new()
+	inp.color = Color(0, 0, 0, 0)
+	inp.set_anchors_preset(Control.PRESET_FULL_RECT)
+	inp.focus_mode = Control.FOCUS_ALL
+	overlay.add_child(inp)
+	inp.gui_input.connect(func(ev: InputEvent):
+		if (ev is InputEventMouseButton and ev.pressed) or \
+		   (ev is InputEventKey and ev.pressed and (ev as InputEventKey).keycode == KEY_SPACE):
+			skip = true)
+	inp.grab_focus()
+
+	while slide_idx < slides.size() and not dismiss:
+		skip = false
+		body.text = ""
+		Sfx.play("bip")
+		var full_text: String = slides[slide_idx]
+		var chars_shown := 0
+		var chars_total := full_text.length()
+		while chars_shown < chars_total and not skip:
+			chars_shown = mini(chars_shown + 2, chars_total)
+			body.text = full_text.left(chars_shown)
+			if chars_shown % 8 == 0:
+				Sfx.play("clack")
+			await get_tree().create_timer(0.025).timeout
+		body.text = full_text
+		# Aguarda input para avançar
+		skip = false
+		var wait_t := 0.0
+		while not skip and wait_t < 8.0:
+			wait_t += 0.05
+			await get_tree().create_timer(0.05).timeout
+		slide_idx += 1
+		if slide_idx < slides.size():
+			Sfx.play("whoosh")
+			var tw_slide := create_tween()
+			tw_slide.tween_property(body, "modulate:a", 0.0, 0.15)
+			await tw_slide.finished
+			body.modulate.a = 1.0
+
+	# Fade out
+	Sfx.play("confirm")
+	var tw_out := create_tween()
+	tw_out.tween_property(overlay, "color:a", 0.0, 0.4)
+	await tw_out.finished
+	overlay.queue_free()
 	mission_panel.visible = true
-	subtitle("Agência", "Cruzar o portão: faça Bram abandonar o posto.")
-	toast("Use objetos e boatos para criar uma distração!", 4.5)
+	subtitle("Panóptico", "Cruzar o portão: faça Bram abandonar o posto.")
+	toast("3 dias. 3 PA por dia. Sem violência.", 4.5)
 	_resize_mission_panel()
 
 

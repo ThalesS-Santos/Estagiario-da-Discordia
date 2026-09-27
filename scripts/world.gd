@@ -367,7 +367,6 @@ func _on_gemini_error(message: String) -> void:
 # ------------------------------------------------------------------ jogador
 func _build_player() -> void:
 	player = PlayerScene.instantiate()
-	player.position = Vector2(640, 500)
 	player.external_drop_control = true
 	player.grab_gate = func(o: WorldObject) -> bool:
 		return phase == Phase.ACTION and held == null and o.attached_to == null and _try_pick(o)
@@ -381,6 +380,48 @@ func _build_player() -> void:
 	cam2.limit_right = int(Game.MAP_SIZE.x)
 	cam2.limit_bottom = int(Game.MAP_SIZE.y)
 	cam2.make_current()
+	# Spawn via portal pixelado numa borda aleatória do mapa
+	player.input_enabled = false
+	_spawn_player_portal()
+
+
+func _spawn_player_portal() -> void:
+	# Borda aleatória: 0=sul, 1=oeste, 2=leste
+	var edge := randi() % 3
+	var spawn_pos: Vector2
+	match edge:
+		0: spawn_pos = Vector2(randf_range(300, 900), 900)   # sul
+		1: spawn_pos = Vector2(80,  randf_range(500, 750))   # oeste
+		_: spawn_pos = Vector2(1200, randf_range(500, 750))  # leste
+	player.position = spawn_pos
+	# Portal: ColorRect pulsante sobre o jogador
+	var portal := ColorRect.new()
+	portal.color = Color(0.55, 0.1, 0.9, 0.0)
+	portal.size = Vector2(36, 48)
+	portal.position = spawn_pos - Vector2(18, 24)
+	portal.z_index = 20
+	add_child(portal)
+	# Animação de abertura do portal
+	Sfx.play("portal_open")
+	var tw := create_tween()
+	tw.tween_property(portal, "color:a", 0.85, 0.25)
+	tw.tween_interval(0.3)
+	# Pisca 3x
+	for _i in 3:
+		tw.tween_property(portal, "color:a", 0.3, 0.07)
+		tw.tween_property(portal, "color:a", 0.85, 0.07)
+	tw.tween_interval(0.1)
+	# Jogador materializa (flash branco) e portal some
+	tw.tween_callback(func():
+		player.modulate = Color(2.0, 2.0, 2.0, 1.0)
+		Sfx.play("whoosh")
+	)
+	tw.tween_property(player, "modulate", Color(1, 1, 1, 1), 0.4)
+	tw.tween_property(portal, "color:a", 0.0, 0.35)
+	tw.tween_callback(func():
+		portal.queue_free()
+		player.input_enabled = phase == Phase.ACTION
+	)
 
 
 func _build_mission() -> void:
@@ -394,16 +435,18 @@ func _build_mission() -> void:
 
 func _on_mission_success() -> void:
 	Game.event_flags["player_crossed_gate"] = true
-	# A travessia é a única resolução válida para a janela do portão.
 	if not _active_event_current.is_empty() and _active_event_current.get("location", "") == "castle_gate":
 		resolve_current_event(true)
 	_evaluate_chain_events()
+	# Dar um impulso final de instabilidade para garantir que chega a 100
+	Game.instability = maxf(Game.instability + 35.0, 100.0)
+	Game.instability_changed.emit(Game.instability)
 	phase = Phase.ENDED
 	if is_instance_valid(player):
 		player.input_enabled = false
-	hud.flash()
-	hud.toast("Você cruzou o portão! Missão cumprida!", 5.0)
-	await get_tree().create_timer(2.0).timeout
+	hud.set_pursuit_mode(false)
+	# Tocar a sequência de revolta completa antes de emitir vitória
+	await _victory_sequence()
 	victory.emit()
 
 
