@@ -48,7 +48,7 @@ func _ready() -> void:
 	check(director.get_node("GeminiHTTPRequest") is HTTPRequest, "HTTP child created dynamically")
 	begin(director)
 	var first_id: int = director._request_id
-	check(director.is_processing, "request enters processing state")
+	check(director._busy, "request enters processing state")
 	check(director.sent_body.generationConfig.response_mime_type == "application/json", "JSON MIME configured")
 	check(director.sent_body.has("system_instruction"), "system instruction separated from player input")
 	var input_data: Dictionary = JSON.parse_string(director.sent_body.contents[0].parts[0].text)
@@ -57,44 +57,44 @@ func _ready() -> void:
 	check(director.sends == 1 and errors.is_empty(), "duplicate ignored without disturbing pending request")
 	complete(director, effect())
 	check(results.size() == 1 and results[0].instability_delta == 18, "nested response decoded")
-	check(typeof(results[0].instability_delta) == TYPE_INT and not director.is_processing, "integer contract and idle state")
+	check(typeof(results[0].instability_delta) == TYPE_INT and not director._busy, "integer contract and idle state")
 	complete(director, effect())
 	check(results.size() == 1, "late completion ignored")
 	begin(director)
 	director._on_timeout(first_id)
-	check(director.is_processing, "old timer cannot cancel a new request")
+	check(director._busy, "old timer cannot cancel a new request")
 	director._on_timeout(director._request_id)
-	check(not director.is_processing and errors.back().contains("15 segundos"), "timeout cancels and reports latency")
+	check(not director._busy and errors.back().contains("15 segundos"), "timeout cancels and reports latency")
 	for envelope in [{}, {"candidates": []}, {"candidates": [null]}, {"candidates": [{"content": {"parts": []}}]}, {"candidates": [{"finishReason": "SAFETY"}]}]:
 		begin(director)
-		var count := errors.size()
+		var err_before_env := errors.size()
 		director._on_request_completed(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(), JSON.stringify(envelope).to_utf8_buffer())
-		check(errors.size() == count + 1 and not director.is_processing, "incomplete or blocked envelope rejected")
+		check(errors.size() == err_before_env + 1 and not director._busy, "incomplete or blocked envelope rejected")
 	for bad in [{"npc_updates": []}, {"instability_delta": 46, "npc_updates": []}, {"instability_delta": 0.5, "npc_updates": []}, {"instability_delta": true, "npc_updates": []}]:
 		begin(director)
-		var count := errors.size()
+		var err_before_bad := errors.size()
 		complete(director, bad)
-		check(errors.size() == count + 1 and not director.is_processing, "invalid effect rejected")
+		check(errors.size() == err_before_bad + 1 and not director._busy, "invalid effect rejected")
 	for mutation in [{"target_node_to_move": "/root/Game"}, {"npc_id": "unknown"}, {"fear_level": 101}, {"new_state": "EXECUTE"}, {"dialogue_bubble": "x".repeat(241)}]:
 		var data := effect()
 		data.npc_updates[0].merge(mutation, true)
 		begin(director)
-		var count := errors.size()
+		var err_before_mut := errors.size()
 		complete(director, data)
-		check(errors.size() == count + 1, "unsafe NPC directive rejected")
+		check(errors.size() == err_before_mut + 1, "unsafe NPC directive rejected")
 	begin(director)
 	director._on_request_completed(HTTPRequest.RESULT_SUCCESS, 429, PackedStringArray(), PackedByteArray())
-	check(not director.is_processing and errors.back().contains("429"), "HTTP status reported")
+	check(not director._busy and errors.back().contains("429"), "HTTP status reported")
 	begin(director)
 	director._on_request_completed(HTTPRequest.RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray())
-	check(not director.is_processing and errors.back().contains("transporte"), "transport failure handled")
+	check(not director._busy and errors.back().contains("transporte"), "transport failure handled")
 	director.send_error = ERR_CANT_CONNECT
 	begin(director)
-	check(not director.is_processing, "immediate request failure clears state")
+	check(not director._busy, "immediate request failure clears state")
 	director.send_error = OK
 	director.api_key = ""
 	begin(director)
-	check(not director.is_processing and errors.back().contains("GEMINI_API_KEY"), "missing key handled locally")
+	check(not director._busy and errors.back().contains("GEMINI_API_KEY"), "missing key handled locally")
 	director.api_key = "test-placeholder-not-a-real-key"
 	begin(director)
 	var count := errors.size()
@@ -102,7 +102,7 @@ func _ready() -> void:
 	Engine.time_scale = 20.0
 	await get_tree().create_timer(15.3, true, false, true).timeout
 	Engine.time_scale = 1.0
-	check(not director.is_processing and errors.size() == count + 1, "real timer expires exactly one request")
+	check(not director._busy and errors.size() == count + 1, "real timer expires exactly one request")
 	check(Time.get_ticks_msec() - started >= 15000, "deadline uses real time despite game speed")
 	director.queue_free()
 	await get_tree().process_frame
