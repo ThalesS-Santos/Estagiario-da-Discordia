@@ -114,7 +114,8 @@ func _ready() -> void:
 		var vd: Dictionary = Game.VILLAGER_DEFS.get(vid, {"name": "Aldeão", "role": "Aldeão", "fear": 30, "anger": 20, "loyalty": 50, "cred": 50}).duplicate()
 		vd["size"] = Vector2(28, 44)
 		vd["home_pos"] = Vector2(float(p[0]), float(p[1]))
-		vd["wide_wander"] = true
+		# menino não faz wander largo pois passa por cima de telhados
+		vd["wide_wander"] = vid != "villager_boy"
 		n.setup(vid, vd, self)
 		npc_root.add_child(n)
 		villagers.append(n)
@@ -1477,6 +1478,7 @@ func _on_npc_confronts(npc: NPC) -> void:
 		"%s viu o Estagiário com %s perto de %s." % [
 			str(npc.def.get("name", npc.id)), obj_desc, Game.loc_name(loc)],
 		30.0, held.id if held else "", Game.player_name, npc.id)
+	hud.show_spotted_flash()
 	hud.toast("%s está te perseguindo!" % str(npc.def.get("name", "NPC")), 4.0)
 	Sfx.play("tension")
 	emit_particle("exclamation", npc.position)
@@ -1487,14 +1489,16 @@ func _on_npc_confronts(npc: NPC) -> void:
 	npc.pursue_speed_mult = diff.pursuit_speed
 	npc.start_pursuit(player, randf_range(dur_min, dur_max))
 	hud.add_event_log("%s iniciou uma perseguição!" % str(npc.def.get("name", "NPC")))
-	if phase == Phase.ACTION:
+	if phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT:
 		phase = Phase.PURSUIT
 		player.input_enabled = true
+		hud.set_pursuit_mode(true)
 
 
 func _on_npc_catches_player(npc: NPC) -> void:
 	_sync_runtime_suspicion()
 	_phase_before_confrontation = phase
+	hud.set_pursuit_mode(false)
 	phase = Phase.CONFRONTATION
 	Game.event_flags["player_caught"] = true
 	npc.stop_pursuit("caught")
@@ -1595,6 +1599,7 @@ func _check_pursuit_ended() -> void:
 		if npc.pursuing:
 			return
 	phase = Phase.ACTION
+	hud.set_pursuit_mode(false)
 	hud.toast("Você escapou!", 2.0)
 	Sfx.play("relief")
 

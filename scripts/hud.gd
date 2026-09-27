@@ -84,6 +84,9 @@ var pin_t := 0.0
 var toast_t := 0.0
 var sub_t := 0.0
 var alarm_t := 0.0
+var _pursuit_active := false
+var _pursuit_t := 0.0
+var _spotted_label: Label
 var card_npc = null
 var card_susp_bar: StatBar
 var card_susp_val: Label
@@ -172,6 +175,19 @@ func _ready() -> void:
 	flash_rect.color = Color(1, 1, 1, 0)
 	flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(flash_rect)
+	_spotted_label = Label.new()
+	_spotted_label.text = "AVISTADO!"
+	_spotted_label.add_theme_font_size_override("font_size", 48)
+	_spotted_label.add_theme_color_override("font_color", Color(1.0, 0.15, 0.1))
+	_spotted_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	_spotted_label.add_theme_constant_override("shadow_offset_x", 3)
+	_spotted_label.add_theme_constant_override("shadow_offset_y", 3)
+	_spotted_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_spotted_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_spotted_label.position = Vector2(320, 200)
+	_spotted_label.modulate.a = 0.0
+	_spotted_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_spotted_label)
 
 
 # ------------------------------------------------------------------ builders
@@ -297,8 +313,8 @@ func _build_clue_popup() -> void:
 
 
 func _build_active_event_panel() -> void:
-	active_event_panel = _9patch(tex_panel, [6, 6, 6, 6], Vector2(320, 130))
-	active_event_panel.position = Vector2(480, 8)
+	active_event_panel = _9patch(tex_panel, [6, 6, 6, 6], Vector2(370, 148))
+	active_event_panel.position = Vector2(455, 8)
 	active_event_panel.visible = false
 	ui.add_child(active_event_panel)
 	var bg := ColorRect.new()
@@ -307,53 +323,50 @@ func _build_active_event_panel() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	active_event_panel.add_child(bg)
 	active_event_panel.move_child(bg, 0)
-	var header := _label("EVENTO", 9, Color(1.0, 0.35, 0.25))
+	var header := _label("⚡ EVENTO ATIVO", 10, Color(1.0, 0.35, 0.25))
 	header.position = Vector2(10, 5)
 	active_event_panel.add_child(header)
-	ae_name_label = _label("", 12, Color(1.0, 0.92, 0.65))
+	ae_name_label = _label("", 14, Color(1.0, 0.92, 0.65))
 	ae_name_label.position = Vector2(10, 18)
-	ae_name_label.custom_minimum_size = Vector2(300, 0)
+	ae_name_label.custom_minimum_size = Vector2(350, 0)
 	active_event_panel.add_child(ae_name_label)
-	var obj_header := _label("Objetivo:", 9, Color(0.7, 0.7, 0.65))
-	obj_header.position = Vector2(10, 36)
-	active_event_panel.add_child(obj_header)
-	ae_obj_label = _label("", 10, Color(1, 1, 0.9))
-	ae_obj_label.position = Vector2(70, 36)
-	ae_obj_label.custom_minimum_size = Vector2(240, 0)
+	ae_obj_label = _label("", 12, Color(1, 1, 0.85))
+	ae_obj_label.position = Vector2(10, 38)
+	ae_obj_label.custom_minimum_size = Vector2(350, 0)
 	ae_obj_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	active_event_panel.add_child(ae_obj_label)
-	ae_time_label = _label("Tempo: --s", 11, Color(1.0, 0.85, 0.4))
-	ae_time_label.position = Vector2(10, 56)
+	ae_time_label = _label("Tempo: --s", 15, Color(1.0, 0.72, 0.2))
+	ae_time_label.position = Vector2(10, 62)
 	active_event_panel.add_child(ae_time_label)
-	var risk_header := _label("Risco:", 9, Color(0.7, 0.7, 0.65))
-	risk_header.position = Vector2(10, 74)
+	var risk_header := _label("Risco:", 10, Color(0.7, 0.7, 0.65))
+	risk_header.position = Vector2(10, 86)
 	active_event_panel.add_child(risk_header)
 	ae_risk_bar = ColorRect.new()
 	ae_risk_bar.color = Color(0.15, 0.15, 0.2)
-	ae_risk_bar.position = Vector2(50, 75)
-	ae_risk_bar.size = Vector2(120, 10)
+	ae_risk_bar.position = Vector2(55, 87)
+	ae_risk_bar.size = Vector2(130, 11)
 	ae_risk_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	active_event_panel.add_child(ae_risk_bar)
 	ae_risk_fill = ColorRect.new()
 	ae_risk_fill.color = Color(0.9, 0.3, 0.2)
-	ae_risk_fill.position = Vector2(50, 75)
-	ae_risk_fill.size = Vector2(60, 10)
+	ae_risk_fill.position = Vector2(55, 87)
+	ae_risk_fill.size = Vector2(65, 11)
 	ae_risk_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	active_event_panel.add_child(ae_risk_fill)
-	ae_risk_label = _label("50%", 9, Color(1, 0.6, 0.5))
-	ae_risk_label.position = Vector2(176, 74)
+	ae_risk_label = _label("50%", 10, Color(1, 0.6, 0.5))
+	ae_risk_label.position = Vector2(192, 86)
 	active_event_panel.add_child(ae_risk_label)
-	ae_npcs_label = _label("", 9, Color(0.75, 0.82, 1.0))
-	ae_npcs_label.position = Vector2(10, 90)
-	ae_npcs_label.custom_minimum_size = Vector2(300, 0)
+	ae_npcs_label = _label("", 10, Color(0.75, 0.82, 1.0))
+	ae_npcs_label.position = Vector2(10, 104)
+	ae_npcs_label.custom_minimum_size = Vector2(350, 0)
 	active_event_panel.add_child(ae_npcs_label)
-	ae_hint_label = _label("", 9, Color(0.5, 0.9, 0.5))
-	ae_hint_label.position = Vector2(10, 106)
-	ae_hint_label.custom_minimum_size = Vector2(300, 0)
+	ae_hint_label = _label("", 10, Color(0.5, 0.9, 0.5))
+	ae_hint_label.position = Vector2(10, 118)
+	ae_hint_label.custom_minimum_size = Vector2(350, 0)
 	active_event_panel.add_child(ae_hint_label)
-	ae_consequence_label = _label("", 9, Color(0.9, 0.5, 0.4))
-	ae_consequence_label.position = Vector2(10, 120)
-	ae_consequence_label.custom_minimum_size = Vector2(300, 0)
+	ae_consequence_label = _label("", 10, Color(0.9, 0.5, 0.4))
+	ae_consequence_label.position = Vector2(10, 133)
+	ae_consequence_label.custom_minimum_size = Vector2(350, 0)
 	active_event_panel.add_child(ae_consequence_label)
 
 
@@ -362,7 +375,7 @@ func show_active_event(ev: Dictionary) -> void:
 	ae_obj_label.text = ev.objective
 	ae_time_label.text = "Tempo: %ds" % int(ev.duration - ev.elapsed)
 	var risk_pct := clampf(ev.risk, 0.0, 100.0)
-	ae_risk_fill.size.x = 120.0 * risk_pct / 100.0
+	ae_risk_fill.size.x = 130.0 * risk_pct / 100.0
 	ae_risk_fill.color = Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.1, 0.05), risk_pct / 100.0)
 	ae_risk_label.text = "%d%%" % int(risk_pct)
 	var npc_names: Array = []
@@ -376,7 +389,7 @@ func show_active_event(ev: Dictionary) -> void:
 	if not active_event_panel.visible:
 		active_event_panel.position.x = 1300
 		active_event_panel.visible = true
-		create_tween().tween_property(active_event_panel, "position:x", 480.0, 0.4).set_trans(Tween.TRANS_BACK)
+		create_tween().tween_property(active_event_panel, "position:x", 455.0, 0.4).set_trans(Tween.TRANS_BACK)
 	else:
 		active_event_panel.visible = true
 
@@ -384,7 +397,7 @@ func show_active_event(ev: Dictionary) -> void:
 func update_active_event_time(remaining: float, risk: float) -> void:
 	ae_time_label.text = "Tempo: %ds" % int(maxf(remaining, 0.0))
 	var risk_pct := clampf(risk, 0.0, 100.0)
-	ae_risk_fill.size.x = 120.0 * risk_pct / 100.0
+	ae_risk_fill.size.x = 130.0 * risk_pct / 100.0
 	ae_risk_fill.color = Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.1, 0.05), risk_pct / 100.0)
 	ae_risk_label.text = "%d%%" % int(risk_pct)
 	if remaining <= 5.0:
@@ -713,6 +726,26 @@ func flash_danger() -> void:
 		alarm_rect.color = Color(1, 0, 0, 0.38)
 		var tw := create_tween()
 		tw.tween_property(alarm_rect, "color:a", 0.0, 0.6)
+
+
+func set_pursuit_mode(on: bool) -> void:
+	_pursuit_active = on
+	if not on:
+		_pursuit_t = 0.0
+		if alarm_rect:
+			alarm_rect.color.a = 0.0
+
+
+func show_spotted_flash() -> void:
+	if not _spotted_label:
+		return
+	var tw := create_tween()
+	tw.tween_property(_spotted_label, "modulate:a", 1.0, 0.1)
+	tw.tween_interval(0.7)
+	tw.tween_property(_spotted_label, "modulate:a", 0.0, 0.6)
+	if alarm_rect:
+		alarm_rect.color = Color(1, 0, 0, 0.55)
+		create_tween().tween_property(alarm_rect, "color:a", 0.0, 0.5)
 
 
 # ================================================================ TOP_LEFT
@@ -1495,7 +1528,10 @@ func _process(delta: float) -> void:
 	sub_t = maxf(sub_t - delta, 0.0)
 	toast_label.modulate.a = clampf(toast_t, 0.0, 1.0)
 	subtitle_label.modulate.a = clampf(sub_t, 0.0, 1.0)
-	if alarm_t > 0.0:
+	if _pursuit_active:
+		_pursuit_t += delta
+		alarm_rect.color.a = 0.18 + 0.12 * sin(_pursuit_t * 4.0)
+	elif alarm_t > 0.0:
 		alarm_t -= delta
 		alarm_rect.color.a = 0.25 * (0.5 + 0.5 * sin(alarm_t * 12.0))
 	else:
