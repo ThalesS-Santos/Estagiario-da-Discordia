@@ -97,10 +97,39 @@ func _create_gate_blocker() -> void:
 	_world.add_child(_gate_blocker)
 
 
+# Objetivo exibido em cada fase de progresso
+const OBJECTIVES := {
+	"exploring": "Descubra como afastar o guarda do portão.",
+	"has_weakness": "Você sabe que Bram abandona o posto com tumulto.\nCrie uma distração na praça ou na ferraria.",
+	"has_diversion": "A distração está pronta.\nLeve Bram para longe e passe pelo portão.",
+	"gate_open": "PORTÃO ABERTO! Cruze agora antes que ele volte.",
+}
+
+# Pistas exibidas no painel desde o início (○ = não encontrada, ✓ = encontrada)
+const CLUE_LIST := [
+	{"id": "bram_padrao",     "label": "Fraqueza de Bram"},
+	{"id": "joao_rancor",     "label": "Rancor do Padeiro"},
+	{"id": "carta_convocacao","label": "Convocação ignorada"},
+	{"id": "moeda_real",      "label": "Moeda do Rei"},
+	{"id": "osric_vigia",     "label": "Olho do Ancião"},
+]
+
+# Mensagens de feedback causal por ação do jogador (heurísticas simples)
+const _FEEDBACK_BY_CLUE := {
+	"bram_padrao": "Bram não resiste a tumultos sérios na praça. Falta criar a faísca.",
+	"joao_rancor": "João da Padaria pode causar um escândalo com Bram. Tente provocar uma briga.",
+	"carta_convocacao": "Pressão pública pode forçar Bram a deixar o posto. Espalhe a convocação.",
+	"moeda_real": "Uma moeda suspeita no lugar errado pode iniciar uma investigação.",
+	"osric_vigia": "Atenção: Osric vigia o portão. Passe quando ele não puder te ver.",
+}
+
+
 func _show_briefing() -> void:
 	phase = MPhase.EXPLORING
 	if _hud and _hud.has_method("show_mission_briefing"):
 		_hud.show_mission_briefing()
+	_push_clue_list()
+	_update_objective()
 
 # ============================================================================
 func tick(delta: float) -> void:
@@ -143,6 +172,7 @@ func _open_gate() -> void:
 	if _hud and _hud.has_method("show_opportunity"):
 		_hud.show_opportunity(GATE_OPEN_DUR)
 	Sfx.play("confirm")
+	_update_objective()
 
 
 func _close_gate(timed_out: bool) -> void:
@@ -162,6 +192,7 @@ func _close_gate(timed_out: bool) -> void:
 			call_deferred("_trigger_fail", "O portão foi fechado antes da travessia. Missão fracassada.")
 		else:
 			_hud.toast("O guarda voltou antes de você atravessar!", 3.0)
+		_update_objective()
 
 
 func _tick_osric_suspicion(delta: float) -> void:
@@ -278,6 +309,26 @@ func notify_npc_whispered(npc_id: String) -> void:
 			_discover_clue("bram_padrao")
 
 
+func notify_gossip_sent(gossip_text: String) -> void:
+	## Feedback causal quando o jogador planta um boato no terminal.
+	if mission_ended or not _hud:
+		return
+	var txt := gossip_text.to_lower()
+	# heurísticas simples para orientar sem spoilar
+	if ("bram" in txt or "guarda" in txt) and not clues_found.has("bram_padrao"):
+		_hud.add_event_log("Interessante... Bram reagiu ao boato. Observe o que o move.")
+	elif "padeiro" in txt or "joão" in txt or "dívida" in txt:
+		if not clues_found.has("joao_rancor"):
+			_discover_clue("joao_rancor")
+		else:
+			_hud.add_event_log("A briga entre João e Bram pode ser o gatilho que você precisa.")
+	elif "rei" in txt or "moeda" in txt or "prova" in txt:
+		_hud.add_event_log("Uma acusação precisa de evidência. Encontre um objeto comprometedor.")
+	elif clues_found.size() == 0:
+		_hud.add_event_log("O boato circulou, mas o guarda não saiu. Tente algo mais específico.")
+	_update_objective()
+
+
 func _discover_clue(clue_id: String) -> void:
 	if clues_found.has(clue_id):
 		return
@@ -290,6 +341,37 @@ func _discover_clue(clue_id: String) -> void:
 		_hud.show_clue_popup(lbl, desc)
 	if _hud:
 		_hud.toast("Pista descoberta: %s" % lbl, 2.5)
+	# atualiza o ícone da pista no painel e mostra feedback causal
+	if _hud and _hud.has_method("mark_clue_found"):
+		_hud.mark_clue_found(clue_id)
+	var feedback: String = _FEEDBACK_BY_CLUE.get(clue_id, "")
+	if feedback != "" and _hud:
+		_hud.add_event_log(feedback)
+	_update_objective()
+
+
+func _push_clue_list() -> void:
+	if not _hud or not _hud.has_method("set_mission_clues"):
+		return
+	var list: Array = []
+	for entry in CLUE_LIST:
+		list.append({"id": entry.id, "label": entry.label, "found": clues_found.has(entry.id)})
+	_hud.set_mission_clues(list)
+
+
+func _update_objective() -> void:
+	if not _hud or not _hud.has_method("set_mission_objective"):
+		return
+	var obj: String
+	if gate_is_open:
+		obj = OBJECTIVES["gate_open"]
+	elif bool(Game.event_flags.get("guard_distracted", false)) or bool(Game.event_flags.get("gate_unguarded", false)):
+		obj = OBJECTIVES["has_diversion"]
+	elif clues_found.has("bram_padrao") or clues_found.has("joao_rancor") or clues_found.has("carta_convocacao"):
+		obj = OBJECTIVES["has_weakness"]
+	else:
+		obj = OBJECTIVES["exploring"]
+	_hud.set_mission_objective(obj)
 
 
 func _trigger_fail(reason: String) -> void:

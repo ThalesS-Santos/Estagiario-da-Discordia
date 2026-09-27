@@ -209,6 +209,8 @@ func _request_caos(narrative: String) -> void:
 		action = "Sussurrou para %s (id: %s) em %s, sem mover um objeto." % [
 			gossip_npc.def.name, gossip_npc.id, Game.loc_name(Game.nearest_location(gossip_npc.position))]
 	pending_gossip = {"text": narrative, "player_action": action}
+	if mission and narrative != "" and mission.has_method("notify_gossip_sent"):
+		mission.notify_gossip_sent(narrative)
 	# Capture live states before stopping movement or changing the simulation phase.
 	var states := _live_npc_states()
 	phase = Phase.SIM

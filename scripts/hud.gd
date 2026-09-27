@@ -42,6 +42,9 @@ var alarm_rect: ColorRect
 # missão
 var mission_panel: NinePatchRect
 var mission_obj_label: Label
+var mission_clues_vbox: VBoxContainer
+var _mission_clue_labels: Dictionary = {}
+var _mission_panel_tween: Tween
 var suspicion_panel: NinePatchRect
 var suspicion_bar: TextureProgressBar
 var opportunity_panel: NinePatchRect
@@ -221,9 +224,17 @@ func _build_mission_panel() -> void:
 	mission_panel.add_child(v)
 	var header := _label("MISSÃO", 10, Color(1.0, 0.82, 0.2))
 	v.add_child(header)
-	mission_obj_label = _label("Cruzar o portão do castelo.", 11, Color(0.92, 0.92, 0.92))
+	mission_obj_label = _label("Descubra como afastar o guarda.", 11, Color(0.92, 0.92, 0.92))
 	mission_obj_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(mission_obj_label)
+	# separador
+	var sep := _label("─────────────────", 9, Color(0.4, 0.5, 0.45))
+	v.add_child(sep)
+	# lista de pistas
+	mission_clues_vbox = VBoxContainer.new()
+	mission_clues_vbox.add_theme_constant_override("separation", 1)
+	mission_clues_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(mission_clues_vbox)
 
 
 func _build_suspicion_panel() -> void:
@@ -599,11 +610,58 @@ func show_mission_briefing() -> void:
 	mission_panel.visible = true
 	subtitle("Agência", "Cruzar o portão: faça Bram abandonar o posto.")
 	toast("Use objetos e boatos para criar uma distração!", 4.5)
+	_resize_mission_panel()
 
 
 func set_mission_objective(text: String) -> void:
 	mission_obj_label.text = text
 	mission_panel.visible = true
+	# pulso amarelo para chamar atenção
+	if _mission_panel_tween:
+		_mission_panel_tween.kill()
+	_mission_panel_tween = create_tween()
+	_mission_panel_tween.tween_property(mission_panel, "modulate", Color(1.6, 1.4, 0.5, 1.0), 0.15)
+	_mission_panel_tween.tween_property(mission_panel, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.4)
+	_resize_mission_panel()
+
+
+func set_mission_clues(clues: Array) -> void:
+	## clues: Array de {id, label, found: bool}
+	## Monta (ou atualiza) a lista de pistas no painel.
+	## Pistas não encontradas ficam acinzentadas com "○"; encontradas ficam verdes com "✓".
+	for c in mission_clues_vbox.get_children():
+		c.queue_free()
+	_mission_clue_labels.clear()
+	for clue in clues:
+		var found: bool = clue.get("found", false)
+		var icon := "✓" if found else "○"
+		var col := Color(0.45, 0.85, 0.45) if found else Color(0.55, 0.60, 0.55)
+		var lbl := _label("%s %s" % [icon, str(clue.get("label", ""))], 10, col)
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		mission_clues_vbox.add_child(lbl)
+		_mission_clue_labels[str(clue.get("id", ""))] = lbl
+	_resize_mission_panel()
+
+
+func mark_clue_found(clue_id: String) -> void:
+	## Atualiza visualmente uma pista para "encontrada" com pulso verde.
+	var lbl: Label = _mission_clue_labels.get(clue_id)
+	if not lbl:
+		return
+	lbl.text = lbl.text.replace("○", "✓")
+	lbl.add_theme_color_override("font_color", Color(0.45, 0.85, 0.45))
+	# pulso
+	var tw := create_tween()
+	tw.tween_property(lbl, "modulate", Color(1.8, 2.0, 1.2, 1.0), 0.1)
+	tw.tween_property(lbl, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.5)
+	_resize_mission_panel()
+
+
+func _resize_mission_panel() -> void:
+	## Ajusta a altura do painel ao conteúdo real.
+	await get_tree().process_frame
+	var h: float = mission_panel.get_combined_minimum_size().y
+	mission_panel.size.y = maxf(h, 52.0)
 
 
 func set_suspicion(val: float) -> void:
