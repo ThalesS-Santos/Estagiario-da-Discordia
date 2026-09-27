@@ -553,7 +553,7 @@ var _event_log_content: Control
 
 func _build_event_log() -> void:
 	var container := Control.new()
-	container.position = Vector2(10, 320)
+	container.position = Vector2(10, 342)
 	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(container)
 	# Botão toggle
@@ -661,236 +661,7 @@ func update_chain_panel(events: Array) -> void:
 
 # ---- API pública da missão -------------------------------------------------
 func show_mission_briefing() -> void:
-	mission_panel.visible = false
-	_show_briefing_overlay()
-
-
-func _show_briefing_overlay() -> void:
-	# ── Tela inteira escura: o estagiário olha para o braço ──
-	var overlay := ColorRect.new()
-	overlay.color = Color(0.0, 0.0, 0.0, 0.0)
-	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay.z_index = 50
-	add_child(overlay)
-
-	# Vinheta: gradiente escuro nas bordas — braço sugerido
-	var vignette := ColorRect.new()
-	vignette.color = Color(0.02, 0.01, 0.04, 0.95)
-	vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	overlay.add_child(vignette)
-
-	# ── Moldura do dispositivo (visor de pulso) ──
-	var dev_w := 580
-	var dev_h := 380
-	var dev_x := (1280 - dev_w) / 2
-	var dev_y := (720 - dev_h) / 2 + 30
-
-	# Corpo do dispositivo (metal escuro)
-	var device := ColorRect.new()
-	device.color = Color(0.12, 0.12, 0.14, 1.0)
-	device.size = Vector2(dev_w + 20, dev_h + 20)
-	device.position = Vector2(dev_x - 10, dev_y - 10)
-	overlay.add_child(device)
-	# Brilho metálico superior
-	var metal_hi := ColorRect.new()
-	metal_hi.color = Color(0.25, 0.26, 0.30, 1.0)
-	metal_hi.size = Vector2(dev_w + 20, 2)
-	metal_hi.position = Vector2(0, 0)
-	device.add_child(metal_hi)
-	# Brilho metálico inferior
-	var metal_lo := ColorRect.new()
-	metal_lo.color = Color(0.06, 0.06, 0.08, 1.0)
-	metal_lo.size = Vector2(dev_w + 20, 2)
-	metal_lo.position = Vector2(0, dev_h + 18)
-	device.add_child(metal_lo)
-	# "Pulseira" — linhas laterais
-	var strap_l := ColorRect.new()
-	strap_l.color = Color(0.08, 0.07, 0.06, 1.0)
-	strap_l.size = Vector2(40, dev_h + 40)
-	strap_l.position = Vector2(dev_x - 50, dev_y - 20)
-	overlay.add_child(strap_l)
-	var strap_r := ColorRect.new()
-	strap_r.color = Color(0.08, 0.07, 0.06, 1.0)
-	strap_r.size = Vector2(40, dev_h + 40)
-	strap_r.position = Vector2(dev_x + dev_w + 10, dev_y - 20)
-	overlay.add_child(strap_r)
-
-	# ── Tela interna do visor (CRT verde) ──
-	var screen := ColorRect.new()
-	screen.color = Color(0.02, 0.06, 0.04, 1.0)
-	screen.size = Vector2(dev_w, dev_h)
-	screen.position = Vector2(dev_x, dev_y)
-	overlay.add_child(screen)
-
-	# Scan lines (linhas horizontais sutis — efeito CRT)
-	for sy in range(0, dev_h, 3):
-		var sl := ColorRect.new()
-		sl.color = Color(0.0, 0.0, 0.0, 0.15)
-		sl.size = Vector2(dev_w, 1)
-		sl.position = Vector2(0, sy)
-		sl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		screen.add_child(sl)
-
-	# Borda interna luminosa (glow verde)
-	var glow_col := Color(0.15, 0.65, 0.35, 0.4)
-	var glow_t := ColorRect.new()
-	glow_t.color = glow_col
-	glow_t.size = Vector2(dev_w, 2)
-	glow_t.position = Vector2(0, 0)
-	screen.add_child(glow_t)
-	var glow_b := ColorRect.new()
-	glow_b.color = glow_col
-	glow_b.size = Vector2(dev_w, 2)
-	glow_b.position = Vector2(0, dev_h - 2)
-	screen.add_child(glow_b)
-	var glow_le := ColorRect.new()
-	glow_le.color = glow_col
-	glow_le.size = Vector2(2, dev_h)
-	glow_le.position = Vector2(0, 0)
-	screen.add_child(glow_le)
-	var glow_ri := ColorRect.new()
-	glow_ri.color = glow_col
-	glow_ri.size = Vector2(2, dev_h)
-	glow_ri.position = Vector2(dev_w - 2, 0)
-	screen.add_child(glow_ri)
-
-	# ── Header do OS ──
-	var os_header := Label.new()
-	os_header.text = "PANÓPTICO OS v3.1          ▓▓▓░  .:.:"
-	os_header.position = Vector2(12, 8)
-	os_header.add_theme_font_size_override("font_size", 10)
-	os_header.add_theme_color_override("font_color", Color(0.3, 0.75, 0.45, 0.7))
-	screen.add_child(os_header)
-
-	var divider := ColorRect.new()
-	divider.color = Color(0.15, 0.55, 0.30, 0.5)
-	divider.size = Vector2(dev_w - 24, 1)
-	divider.position = Vector2(12, 24)
-	screen.add_child(divider)
-
-	# ── Corpo do texto ──
-	var body := RichTextLabel.new()
-	body.bbcode_enabled = true
-	body.size = Vector2(dev_w - 32, dev_h - 68)
-	body.position = Vector2(16, 30)
-	body.add_theme_font_size_override("normal_font_size", 13)
-	body.add_theme_color_override("default_color", Color(0.35, 0.90, 0.50))
-	body.scroll_active = false
-	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	screen.add_child(body)
-
-	# Cursor piscante
-	var cursor := Label.new()
-	cursor.text = "█"
-	cursor.position = Vector2(16, dev_h - 34)
-	cursor.add_theme_font_size_override("font_size", 12)
-	cursor.add_theme_color_override("font_color", Color(0.35, 0.90, 0.50, 0.9))
-	screen.add_child(cursor)
-
-	# Rodapé
-	var footer := Label.new()
-	footer.text = "[ ESPAÇO / CLIQUE ]"
-	footer.position = Vector2(dev_w - 160, dev_h - 18)
-	footer.add_theme_font_size_override("font_size", 9)
-	footer.add_theme_color_override("font_color", Color(0.25, 0.55, 0.35, 0.6))
-	screen.add_child(footer)
-
-	# Indicador de slide
-	var slide_ind := Label.new()
-	slide_ind.position = Vector2(12, dev_h - 18)
-	slide_ind.add_theme_font_size_override("font_size", 9)
-	slide_ind.add_theme_color_override("font_color", Color(0.25, 0.55, 0.35, 0.6))
-	screen.add_child(slide_ind)
-
-	# ── Slides ──
-	var g := "[color=#50ff80]"
-	var r := "[color=#ff6060]"
-	var y := "[color=#d0c040]"
-	var w := "[color=#c0d0c8]"
-	var slides: Array[String] = [
-		"> OPERAÇÃO: %sEFEITO BORBOLETA[/color]\n> REF: 14.7-F / LINHA ALFA-3\n> STATUS: %sATIVO[/color]\n\n%sANOMALIA DETECTADA:[/color]\nRei Aldemar I — governante local.\nProjeção: em 30 dias declarará guerra.\nA região será destruída.\n\n%sSua presença já alterou a linha do tempo.[/color]\n%sO que você fizer nos próximos 3 dias decide tudo.[/color]" % [y, g, r, w, w],
-		"> ALVO: %sREI ALDEMAR I[/color]\n> LOCALIZAÇÃO: Castelo — extremo norte\n> PRIORIDADE: %sMÁXIMA[/color]\n\n%sDIRETRIZ DA AGÊNCIA:[/color]\nNão use violência — criaria um mártir.\nNão tente fuga — ele voltaria com exército.\n\nSua arma: %sInstabilidade Social[/color].\nQuando a população perder a fé no rei\n(Instabilidade >= 100), ela o derruba.\n\nPrazo: %s3 DIAS[/color]." % [r, r, w, g, y],
-		"> FERRAMENTAS DISPONÍVEIS:\n\n%s[PEGAR OBJETO][/color] — clique perto de um objeto\n  Mova-o para outro local. Custo: 1 PA.\n\n%s[SOLTAR + NARRATIVA][/color] — clique para soltar\n  Escreva o boato. Custo: 1 PA.\n\n%s[SUSSURRAR][/color] — posicione-se atrás de um NPC\n  Pressione E. Custo: 1 PA.\n\n> ORÇAMENTO DIÁRIO: %s3 PA[/color]\n> %sALERTA:[/color] Guardas suspeitos perseguem." % [g, g, g, y, r],
-	]
-
-	# ── Fade in ──
-	Sfx.play("portal_open")
-	var tw_in := create_tween()
-	tw_in.tween_property(overlay, "color:a", 1.0, 0.5)
-	await tw_in.finished
-
-	var slide_idx := 0
-	var skip := false
-
-	# Input para avançar
-	var inp := ColorRect.new()
-	inp.color = Color(0, 0, 0, 0)
-	inp.set_anchors_preset(Control.PRESET_FULL_RECT)
-	inp.focus_mode = Control.FOCUS_ALL
-	overlay.add_child(inp)
-	inp.gui_input.connect(func(ev: InputEvent):
-		if (ev is InputEventMouseButton and ev.pressed) or \
-		   (ev is InputEventKey and ev.pressed and (ev as InputEventKey).keycode == KEY_SPACE):
-			skip = true)
-	inp.grab_focus()
-
-	# Tween para cursor piscante
-	var cursor_tw := create_tween().set_loops()
-	cursor_tw.tween_property(cursor, "modulate:a", 0.0, 0.4)
-	cursor_tw.tween_property(cursor, "modulate:a", 1.0, 0.4)
-
-	while slide_idx < slides.size():
-		skip = false
-		body.text = ""
-		slide_ind.text = "[%d/%d]" % [slide_idx + 1, slides.size()]
-		Sfx.play("bip")
-		var full_text: String = slides[slide_idx]
-		var chars_shown := 0
-		var chars_total := full_text.length()
-		while chars_shown < chars_total and not skip:
-			chars_shown = mini(chars_shown + 2, chars_total)
-			body.text = full_text.left(chars_shown)
-			if chars_shown % 10 == 0:
-				Sfx.play("clack")
-			await get_tree().create_timer(0.02).timeout
-		body.text = full_text
-		# Aguarda input
-		skip = false
-		var wait_t := 0.0
-		while not skip and wait_t < 10.0:
-			wait_t += 0.05
-			await get_tree().create_timer(0.05).timeout
-		slide_idx += 1
-		if slide_idx < slides.size():
-			Sfx.play("whoosh")
-			var tw_s := create_tween()
-			tw_s.tween_property(body, "modulate:a", 0.0, 0.12)
-			await tw_s.finished
-			body.modulate.a = 1.0
-
-	# ── Desligar visor ──
-	cursor_tw.kill()
-	cursor.visible = false
-	Sfx.play("confirm")
-	# Flash branco na tela do dispositivo
-	var flash := ColorRect.new()
-	flash.color = Color(0.5, 1.0, 0.6, 0.8)
-	flash.size = Vector2(dev_w, dev_h)
-	flash.position = Vector2(dev_x, dev_y)
-	overlay.add_child(flash)
-	var tw_flash := create_tween()
-	tw_flash.tween_property(flash, "color:a", 0.0, 0.3)
-	tw_flash.tween_property(screen, "color", Color(0.0, 0.0, 0.0, 1.0), 0.2)
-	await tw_flash.finished
-	# Fade out total
-	var tw_out := create_tween()
-	tw_out.tween_property(overlay, "modulate:a", 0.0, 0.6)
-	await tw_out.finished
-	overlay.queue_free()
 	mission_panel.visible = true
-	subtitle("Panóptico", "Cruzar o portão: faça Bram abandonar o posto.")
-	toast("3 dias. 3 PA por dia. Sem violência.", 4.5)
 	_resize_mission_panel()
 
 
@@ -1729,7 +1500,18 @@ func _tut_render() -> void:
 	v.add_child(b)
 
 	tutorial_panel.add_child(pc)
+	_fit_tut_panel(pc, outer)
+	_fit_tut_panel.call_deferred(pc, outer)
 	create_tween().tween_property(pc, "modulate:a", 1.0, 0.25)
+
+
+func _fit_tut_panel(pc: Control, content: Control) -> void:
+	## O NinePatch não cresce com os filhos: sem isso o painel vira uma barra fina e o texto fica solto no mapa.
+	if not is_instance_valid(pc):
+		return
+	var sz := content.get_combined_minimum_size()
+	pc.size = Vector2(maxf(sz.x, 680.0), sz.y)
+	pc.position = Vector2((1280.0 - pc.size.x) / 2.0, (720.0 - pc.size.y) / 2.0 + 60.0)
 
 
 # ------------------------------------------------------------ api para o mundo

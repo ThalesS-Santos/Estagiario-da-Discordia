@@ -21,6 +21,7 @@ var _sim_clock_to := 8.0
 
 var phase: int = Phase.ACTION
 var tutorial := false
+var intro_active := false ## visor de pulso + portal: jogador e cliques do mundo bloqueados
 var show_names := true
 var npcs: Dictionary = {}
 var objects: Dictionary = {}
@@ -148,7 +149,7 @@ func _ready() -> void:
 	_restore_checkpoint(Game.world_checkpoint)
 	_start_day()
 	if tutorial:
-		hud.show_tutorial()
+		_play_intro()
 
 
 func _create_gemini_director() -> GeminiDirector:
@@ -380,48 +381,102 @@ func _build_player() -> void:
 	cam2.limit_right = int(Game.MAP_SIZE.x)
 	cam2.limit_bottom = int(Game.MAP_SIZE.y)
 	cam2.make_current()
-	# Spawn via portal pixelado numa borda aleatória do mapa
-	player.input_enabled = false
-	_spawn_player_portal()
+	player.position = Vector2(640, 500)
 
 
-func _spawn_player_portal() -> void:
-	# Borda aleatória: 0=sul, 1=oeste, 2=leste
-	var edge := randi() % 3
-	var spawn_pos: Vector2
-	match edge:
-		0: spawn_pos = Vector2(randf_range(300, 900), 900)   # sul
-		1: spawn_pos = Vector2(80,  randf_range(500, 750))   # oeste
-		_: spawn_pos = Vector2(1200, randf_range(500, 750))  # leste
-	player.position = spawn_pos
-	# Portal: ColorRect pulsante sobre o jogador
-	var portal := ColorRect.new()
-	portal.color = Color(0.55, 0.1, 0.9, 0.0)
-	portal.size = Vector2(36, 48)
-	portal.position = spawn_pos - Vector2(18, 24)
-	portal.z_index = 20
-	add_child(portal)
-	# Animação de abertura do portal
+# ------------------------------------------------------------------ abertura: visor de pulso + portal
+const PORTAL_TEX := preload("res://assets/gen/fx/portal.png")
+const PORTAL_SPARK_TEX := preload("res://assets/gen/fx/portal_spark.png")
+## Pontas de estrada nas bordas do mapa (livres de árvores); o estagiário sai andando para dentro.
+const PORTAL_SPAWNS := [
+	{"pos": Vector2(40, 480), "dir": Vector2.RIGHT},
+	{"pos": Vector2(1240, 480), "dir": Vector2.LEFT},
+	{"pos": Vector2(176, 768), "dir": Vector2.RIGHT},
+]
+
+
+func _play_intro() -> void:
+	intro_active = true
+	var spawn: Dictionary = PORTAL_SPAWNS[randi() % PORTAL_SPAWNS.size()]
+	player.position = spawn.pos + Vector2(0, -2)
+	player.visible = false
+	player.camera.reset_smoothing()
+	hud.ui.visible = false
+	var intro := WristIntro.new()
+	hud.add_child(intro)
+	intro.play()
+	await intro.finished
+	intro.reveal_world()
+	await _portal_arrival(spawn)
+	hud.ui.visible = true
+	hud.new_day()
+	hud.subtitle("Panóptico", "Primeiro passo: descubra como tirar Bram do portão.")
+	intro_active = false
+	hud.show_tutorial()
+
+
+func _portal_arrival(spawn: Dictionary) -> void:
+	var portal := AnimatedSprite2D.new()
+	var frames := SpriteFrames.new()
+	var add_anim := func(anim: String, idx: Array, fps: float, loop: bool) -> void:
+		frames.add_animation(anim)
+		frames.set_animation_speed(anim, fps)
+		frames.set_animation_loop(anim, loop)
+		for i: int in idx:
+			var a := AtlasTexture.new()
+			a.atlas = PORTAL_TEX
+			a.region = Rect2(i * 32, 0, 32, 44)
+			frames.add_frame(anim, a)
+	add_anim.call("open", [0, 1, 2, 3, 4], 14.0, false)
+	add_anim.call("loop", [5, 6, 7, 8, 9, 10], 12.0, true)
+	add_anim.call("close", [4, 3, 2, 1, 0], 16.0, false)
+	portal.sprite_frames = frames
+	portal.centered = false
+	portal.offset = Vector2(-16, -42)
+	portal.scale = Vector2(2, 2)
+	portal.position = spawn.pos
+	npc_root.add_child(portal)
+	var sparks := CPUParticles2D.new()
+	sparks.texture = PORTAL_SPARK_TEX
+	sparks.amount = 18
+	sparks.lifetime = 0.8
+	sparks.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	sparks.emission_rect_extents = Vector2(10, 18)
+	sparks.position = Vector2(0, -22)
+	sparks.direction = Vector2(0, -1)
+	sparks.spread = 70.0
+	sparks.gravity = Vector2(0, 30)
+	sparks.initial_velocity_min = 20.0
+	sparks.initial_velocity_max = 45.0
+	sparks.scale_amount_min = 0.5
+	sparks.scale_amount_max = 1.0
+	sparks.emitting = false
+	portal.add_child(sparks)
+	await get_tree().create_timer(0.35).timeout
 	Sfx.play("portal_open")
-	var tw := create_tween()
-	tw.tween_property(portal, "color:a", 0.85, 0.25)
-	tw.tween_interval(0.3)
-	# Pisca 3x
-	for _i in 3:
-		tw.tween_property(portal, "color:a", 0.3, 0.07)
-		tw.tween_property(portal, "color:a", 0.85, 0.07)
-	tw.tween_interval(0.1)
-	# Jogador materializa (flash branco) e portal some
-	tw.tween_callback(func():
-		player.modulate = Color(2.0, 2.0, 2.0, 1.0)
-		Sfx.play("whoosh")
-	)
-	tw.tween_property(player, "modulate", Color(1, 1, 1, 1), 0.4)
-	tw.tween_property(portal, "color:a", 0.0, 0.35)
-	tw.tween_callback(func():
-		portal.queue_free()
-		player.input_enabled = phase == Phase.ACTION
-	)
+	portal.play("open")
+	await portal.animation_finished
+	portal.play("loop")
+	sparks.emitting = true
+	shake = 4.0
+	await get_tree().create_timer(0.45).timeout
+	# o estagiário atravessa: surge em branco e sai andando
+	Sfx.play("whoosh")
+	player.visible = true
+	player.modulate = Color(3.0, 3.0, 3.0, 1.0)
+	create_tween().tween_property(player, "modulate", Color.WHITE, 0.5)
+	player.scripted_dir = spawn.dir
+	await get_tree().create_timer(0.5).timeout
+	player.scripted_dir = Vector2.ZERO
+	player.set_emotion("NERVOUS")
+	await get_tree().create_timer(0.5).timeout
+	sparks.emitting = false
+	portal.play("close")
+	Sfx.play("plop")
+	await portal.animation_finished
+	portal.queue_free()
+	await get_tree().create_timer(0.6).timeout
+	player.set_emotion("NEUTRAL")
 
 
 func _build_mission() -> void:
@@ -628,7 +683,7 @@ func restart_day() -> void:
 
 # ------------------------------------------------------------------ input
 func _unhandled_input(event: InputEvent) -> void:
-	if phase == Phase.TERMINAL or phase == Phase.CONFRONTATION or phase == Phase.ENDED:
+	if intro_active or phase == Phase.TERMINAL or phase == Phase.CONFRONTATION or phase == Phase.ENDED:
 		return
 	if event is InputEventMouseButton and event.pressed:
 		match event.button_index:
@@ -1415,7 +1470,7 @@ func _process(delta: float) -> void:
 		hud.set_hover(hovered_obj, hovered_npc)
 	if held == null and player.held_object != null:
 		player.forget_held()
-	player.input_enabled = phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT or phase == Phase.PURSUIT
+	player.input_enabled = not intro_active and (phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT or phase == Phase.PURSUIT)
 	if held and (phase == Phase.TERMINAL or ai_waiting):
 		held.position = drop_pos
 	# simulação

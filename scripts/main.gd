@@ -462,54 +462,9 @@ func show_name_entry() -> void:
 		l.text = "ID registrado. Bem-vindo, %s.\nPreparando portal dimensional..." % Game.player_name
 		l.visible_characters = -1
 		if await _wait(2.2):
-			show_briefing())
-
-
-func show_briefing() -> void:
-	var s := _new_screen()
-	_bg(s)
-	var l := _lbl(s, "", 20, Color(0.7, 1.0, 0.85), Vector2(220, 150), 840.0, false)
-	_lbl(s, "[ ESPAÇO / CLIQUE para pular ]", 12, Color(0.4, 0.6, 0.5), Vector2(0, 660))
-	var txt := "[ESTÁTICA DE RÁDIO]\n\nOperador %s. Primeiro dia na Agência Panóptico.\n\nSeu briefing: uma aldeia medieval. Coordenadas 14.7-F, Linha Alfa-3. Uma anomalia: o Rei Aldemar I.\n\nProjeção: se este rei permanecer no trono por mais 30 dias, iniciará uma guerra que destruirá a região.\n\nSua missão: removê-lo do trono sem intervenção direta. Sem violência. Sem comunicação com os habitantes. Apenas... o ambiente. Em 3 dias.\n\nBoa sorte, Estagiário." % Game.player_name
-	var my := seq_id
-	var skip := [false]
-	var inp := Control.new()
-	inp.set_anchors_preset(Control.PRESET_FULL_RECT)
-	s.add_child(inp)
-	inp.gui_input.connect(func(ev):
-		if (ev is InputEventMouseButton and ev.pressed) or (ev is InputEventKey and ev.pressed):
-			skip[0] = true)
-	inp.focus_mode = Control.FOCUS_ALL
-	inp.grab_focus()
-	l.text = txt
-	l.visible_characters = 0
-	var total := txt.length()
-	var i := 0.0
-	while i < total and not skip[0] and my == seq_id:
-		i += 1.4
-		l.visible_characters = int(i)
-		if int(i) % 3 == 0:
-			Sfx.play("clack")
-		await get_tree().create_timer(0.03).timeout
-	if my != seq_id:
-		return
-	l.visible_characters = -1
-	if not skip[0]:
-		skip[0] = false
-		var w := 0.0
-		while w < 6.0 and not skip[0] and my == seq_id:
-			w += 0.05
-			await get_tree().create_timer(0.05).timeout
-	else:
-		skip[0] = false
-		var w2 := 0.0
-		while w2 < 4.0 and not skip[0] and my == seq_id:
-			w2 += 0.05
-			await get_tree().create_timer(0.05).timeout
-	if my == seq_id:
-		_flash()
-		Game.reset()
-		start_game(true)
+			_flash()
+			Game.reset()
+			start_game(true))
 
 
 func start_game(new_game: bool) -> void:

@@ -69,6 +69,7 @@ var emotion: String = "NEUTRAL"
 var facing_x: float = 1.0
 var held_object: Node2D = null
 var input_enabled: bool = true ## false congela o jogador (terminal aberto, simulação)
+var scripted_dir: Vector2 = Vector2.ZERO ## cinemáticas: anda nessa direção enquanto o input está desligado
 var grab_gate: Callable = Callable() ## (obj) -> bool: permite ao jogo aprovar/cobrar o ato de pegar
 
 # Parâmetros animados pelo AnimationPlayer (panic_jump / whisper).
@@ -200,6 +201,8 @@ func _physics_process(delta: float) -> void:
 	if state != State.INTERACT:
 		if input_enabled:
 			_move_dir = Input.get_vector("move_left", "move_right", "move_up", "move_down") # já normalizado (8 direções)
+		elif scripted_dir != Vector2.ZERO:
+			_move_dir = scripted_dir
 		var wants_stealth := input_enabled and Input.is_action_pressed("stealth")
 		if wants_stealth:
 			_change_state(State.STEALTH)
