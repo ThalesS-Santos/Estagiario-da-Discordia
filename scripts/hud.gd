@@ -692,8 +692,8 @@ func _event_log_entry(idx: int, text: String) -> RichTextLabel:
 
 func _scroll_event_log_to_end() -> void:
 	await get_tree().process_frame
-	var bar := _event_log_scroll.get_v_scroll_bar()
-	_event_log_scroll.scroll_vertical = int(bar.max_value)
+	var vbar := _event_log_scroll.get_v_scroll_bar()
+	_event_log_scroll.scroll_vertical = int(vbar.max_value)
 
 
 # ---- cadeia causal ----------------------------------------------------------

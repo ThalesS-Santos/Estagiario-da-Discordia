@@ -9,6 +9,7 @@ const MAP_SIZE := Vector2(1280, 960)
 const MAX_DAYS := 3
 const AP_PER_DAY := 3
 const SAVE_PATH := "user://save.json"
+const SAVE_VERSION := 5 ## gravação e leitura usam o mesmo número; ao subir, a leitura aceita as anteriores
 const SETTINGS_PATH := "user://settings.cfg"
 
 ## Progressão de dificuldade por dia. Cada dia escala parâmetros do jogo.
@@ -341,7 +342,7 @@ var active_events: Array = []
 var _active_event_counter := 0
 var persistence_enabled := true
 var ui_theme: Theme
-var settings := {"master": 1.0, "music": 0.8, "sfx": 0.8, "sim_speed": 1.0, "resolution": 0, "subtitles": true, "colorblind": false}
+var settings := {"master": 1.0, "music": 0.8, "sfx": 0.8, "sim_speed": 1.0, "resolution": 0, "subtitles": true}
 
 ## Reputação por grupo: -100 (hostil) a +100 (aliado). Afeta reações, diálogos e acesso.
 var reputation: Dictionary = {}
@@ -979,7 +980,7 @@ func save_game(path := SAVE_PATH) -> bool:
 	if not f:
 		save_error.emit("Não foi possível salvar o progresso.")
 		return false
-	f.store_string(JSON.stringify({"version": 5, "name": player_name, "day": day,
+	f.store_string(JSON.stringify({"version": SAVE_VERSION, "name": player_name, "day": day,
 		"instability": instability, "rumors": rumors, "npc": npc_state,
 		"world": world_checkpoint, "evidence": evidence_log,
 		"events": event_states, "event_flags": event_flags,
@@ -1053,7 +1054,7 @@ func _read_save(path: String) -> Dictionary:
 	if typeof(data) != TYPE_DICTIONARY:
 		return {}
 	var version = data.get("version", 1)
-	if not AIContract.number_in(version, 1, 4) or float(version) != floorf(float(version)):
+	if not AIContract.number_in(version, 1, SAVE_VERSION) or float(version) != floorf(float(version)):
 		return {}
 	if typeof(data.get("name")) != TYPE_STRING or data.name.length() > 12:
 		return {}

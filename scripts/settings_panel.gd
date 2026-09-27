@@ -50,7 +50,6 @@ func _ready() -> void:
 	row2.add_child(sp)
 	box.add_child(row2)
 	_toggle(box, "SUBTÍTULOS", "subtitles")
-	_toggle(box, "MODO DALTÔNICO", "colorblind")
 	var b := Button.new()
 	b.text = "[ VOLTAR ]"
 	b.pressed.connect(func():
