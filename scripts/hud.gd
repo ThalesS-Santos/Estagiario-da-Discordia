@@ -546,19 +546,48 @@ func hide_action_menu() -> void:
 	action_panel.visible = false
 
 
-# ---- fila de eventos -------------------------------------------------------
+# ---- fila de eventos (colapsável) ------------------------------------------
+var _event_log_expanded := false
+var _event_log_btn: Button
+var _event_log_content: Control
+
 func _build_event_log() -> void:
-	event_log_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(320, 140))
-	event_log_panel.position = Vector2(10, 720 - 400)
+	var container := Control.new()
+	container.position = Vector2(10, 320)
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(container)
+	# Botão toggle
+	_event_log_btn = Button.new()
+	_event_log_btn.text = "▸ EVENTOS"
+	_event_log_btn.position = Vector2.ZERO
+	_event_log_btn.custom_minimum_size = Vector2(100, 24)
+	var sb_n := StyleBoxTexture.new()
+	sb_n.texture = tex_button
+	sb_n.region_rect = Rect2(0, 0, 32, 14)
+	_set_9slice_margins(sb_n, 4)
+	var sb_h := StyleBoxTexture.new()
+	sb_h.texture = tex_button
+	sb_h.region_rect = Rect2(0, 14, 32, 14)
+	_set_9slice_margins(sb_h, 4)
+	_event_log_btn.add_theme_stylebox_override("normal", sb_n)
+	_event_log_btn.add_theme_stylebox_override("hover", sb_h)
+	_event_log_btn.add_theme_font_size_override("font_size", 11)
+	_event_log_btn.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
+	_event_log_btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 0.6))
+	_event_log_btn.pressed.connect(_toggle_event_log)
+	_event_log_btn.mouse_entered.connect(func(): Sfx.play("bip"))
+	container.add_child(_event_log_btn)
+	# Painel expandível
+	event_log_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(240, 120))
+	event_log_panel.position = Vector2(0, 28)
+	event_log_panel.visible = false
 	event_log_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(event_log_panel)
-	var title := _label("EVENTOS", 11, Color(1.0, 0.85, 0.35))
-	title.position = Vector2(10, 6)
-	event_log_panel.add_child(title)
+	container.add_child(event_log_panel)
+	_event_log_content = event_log_panel
 	var clip := Control.new()
 	clip.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
-	clip.position = Vector2(8, 22)
-	clip.size = Vector2(304, 112)
+	clip.position = Vector2(8, 6)
+	clip.size = Vector2(224, 108)
 	clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	event_log_panel.add_child(clip)
 	event_log_box = VBoxContainer.new()
@@ -567,11 +596,23 @@ func _build_event_log() -> void:
 	clip.add_child(event_log_box)
 
 
+func _toggle_event_log() -> void:
+	_event_log_expanded = not _event_log_expanded
+	_event_log_content.visible = _event_log_expanded
+	_event_log_btn.text = "▾ EVENTOS" if _event_log_expanded else "▸ EVENTOS"
+	Sfx.play("clack")
+
+
 func add_event_log(text: String) -> void:
 	_event_log.append(text)
 	if _event_log.size() > 20:
 		_event_log = _event_log.slice(-20)
 	_refresh_event_log()
+	# Pulso no botão para indicar novo evento
+	if not _event_log_expanded and is_instance_valid(_event_log_btn):
+		var tw := create_tween()
+		tw.tween_property(_event_log_btn, "modulate", Color(1.5, 1.2, 0.5), 0.15)
+		tw.tween_property(_event_log_btn, "modulate", Color(1, 1, 1), 0.4)
 
 
 func _refresh_event_log() -> void:
@@ -582,7 +623,7 @@ func _refresh_event_log() -> void:
 		var idx := _event_log.size() - visible_events.size() + i + 1
 		var lbl := _label("[%d] %s" % [idx, visible_events[i]], 10, Color(0.75, 0.85, 0.8))
 		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		lbl.custom_minimum_size.x = 300
+		lbl.custom_minimum_size.x = 218
 		event_log_box.add_child(lbl)
 
 
@@ -625,81 +666,164 @@ func show_mission_briefing() -> void:
 
 
 func _show_briefing_overlay() -> void:
-	# Overlay escuro com card central — lore + objetivo + ferramentas
+	# ── Tela inteira escura: o estagiário olha para o braço ──
 	var overlay := ColorRect.new()
-	overlay.color = Color(0.0, 0.0, 0.02, 0.0)
+	overlay.color = Color(0.0, 0.0, 0.0, 0.0)
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.z_index = 50
 	add_child(overlay)
 
-	# Card central
-	var card := ColorRect.new()
-	card.color = Color(0.04, 0.06, 0.10, 0.95)
-	card.size = Vector2(700, 380)
-	card.position = Vector2(290, 170)
-	overlay.add_child(card)
+	# Vinheta: gradiente escuro nas bordas — braço sugerido
+	var vignette := ColorRect.new()
+	vignette.color = Color(0.02, 0.01, 0.04, 0.95)
+	vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_child(vignette)
 
-	# Borda dourada (linha superior)
-	var border_top := ColorRect.new()
-	border_top.color = Color(0.80, 0.65, 0.20, 1.0)
-	border_top.size = Vector2(700, 3)
-	border_top.position = Vector2(0, 0)
-	card.add_child(border_top)
-	var border_bot := ColorRect.new()
-	border_bot.color = Color(0.80, 0.65, 0.20, 1.0)
-	border_bot.size = Vector2(700, 3)
-	border_bot.position = Vector2(0, 377)
-	card.add_child(border_bot)
+	# ── Moldura do dispositivo (visor de pulso) ──
+	var dev_w := 580
+	var dev_h := 380
+	var dev_x := (1280 - dev_w) / 2
+	var dev_y := (720 - dev_h) / 2 + 30
 
-	# Cabeçalho
-	var header := Label.new()
-	header.text = "▶ TRANSMISSÃO: AGÊNCIA PANÓPTICO"
-	header.position = Vector2(24, 18)
-	header.add_theme_font_size_override("font_size", 13)
-	header.add_theme_color_override("font_color", Color(0.80, 0.65, 0.20))
-	card.add_child(header)
+	# Corpo do dispositivo (metal escuro)
+	var device := ColorRect.new()
+	device.color = Color(0.12, 0.12, 0.14, 1.0)
+	device.size = Vector2(dev_w + 20, dev_h + 20)
+	device.position = Vector2(dev_x - 10, dev_y - 10)
+	overlay.add_child(device)
+	# Brilho metálico superior
+	var metal_hi := ColorRect.new()
+	metal_hi.color = Color(0.25, 0.26, 0.30, 1.0)
+	metal_hi.size = Vector2(dev_w + 20, 2)
+	metal_hi.position = Vector2(0, 0)
+	device.add_child(metal_hi)
+	# Brilho metálico inferior
+	var metal_lo := ColorRect.new()
+	metal_lo.color = Color(0.06, 0.06, 0.08, 1.0)
+	metal_lo.size = Vector2(dev_w + 20, 2)
+	metal_lo.position = Vector2(0, dev_h + 18)
+	device.add_child(metal_lo)
+	# "Pulseira" — linhas laterais
+	var strap_l := ColorRect.new()
+	strap_l.color = Color(0.08, 0.07, 0.06, 1.0)
+	strap_l.size = Vector2(40, dev_h + 40)
+	strap_l.position = Vector2(dev_x - 50, dev_y - 20)
+	overlay.add_child(strap_l)
+	var strap_r := ColorRect.new()
+	strap_r.color = Color(0.08, 0.07, 0.06, 1.0)
+	strap_r.size = Vector2(40, dev_h + 40)
+	strap_r.position = Vector2(dev_x + dev_w + 10, dev_y - 20)
+	overlay.add_child(strap_r)
+
+	# ── Tela interna do visor (CRT verde) ──
+	var screen := ColorRect.new()
+	screen.color = Color(0.02, 0.06, 0.04, 1.0)
+	screen.size = Vector2(dev_w, dev_h)
+	screen.position = Vector2(dev_x, dev_y)
+	overlay.add_child(screen)
+
+	# Scan lines (linhas horizontais sutis — efeito CRT)
+	for sy in range(0, dev_h, 3):
+		var sl := ColorRect.new()
+		sl.color = Color(0.0, 0.0, 0.0, 0.15)
+		sl.size = Vector2(dev_w, 1)
+		sl.position = Vector2(0, sy)
+		sl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		screen.add_child(sl)
+
+	# Borda interna luminosa (glow verde)
+	var glow_col := Color(0.15, 0.65, 0.35, 0.4)
+	var glow_t := ColorRect.new()
+	glow_t.color = glow_col
+	glow_t.size = Vector2(dev_w, 2)
+	glow_t.position = Vector2(0, 0)
+	screen.add_child(glow_t)
+	var glow_b := ColorRect.new()
+	glow_b.color = glow_col
+	glow_b.size = Vector2(dev_w, 2)
+	glow_b.position = Vector2(0, dev_h - 2)
+	screen.add_child(glow_b)
+	var glow_le := ColorRect.new()
+	glow_le.color = glow_col
+	glow_le.size = Vector2(2, dev_h)
+	glow_le.position = Vector2(0, 0)
+	screen.add_child(glow_le)
+	var glow_ri := ColorRect.new()
+	glow_ri.color = glow_col
+	glow_ri.size = Vector2(2, dev_h)
+	glow_ri.position = Vector2(dev_w - 2, 0)
+	screen.add_child(glow_ri)
+
+	# ── Header do OS ──
+	var os_header := Label.new()
+	os_header.text = "PANÓPTICO OS v3.1          ▓▓▓░  .:.:"
+	os_header.position = Vector2(12, 8)
+	os_header.add_theme_font_size_override("font_size", 10)
+	os_header.add_theme_color_override("font_color", Color(0.3, 0.75, 0.45, 0.7))
+	screen.add_child(os_header)
 
 	var divider := ColorRect.new()
-	divider.color = Color(0.25, 0.30, 0.40, 1.0)
-	divider.size = Vector2(652, 1)
-	divider.position = Vector2(24, 40)
-	card.add_child(divider)
+	divider.color = Color(0.15, 0.55, 0.30, 0.5)
+	divider.size = Vector2(dev_w - 24, 1)
+	divider.position = Vector2(12, 24)
+	screen.add_child(divider)
 
-	# Corpo de texto (typewriter)
+	# ── Corpo do texto ──
 	var body := RichTextLabel.new()
 	body.bbcode_enabled = true
-	body.size = Vector2(652, 270)
-	body.position = Vector2(24, 52)
+	body.size = Vector2(dev_w - 32, dev_h - 68)
+	body.position = Vector2(16, 30)
 	body.add_theme_font_size_override("normal_font_size", 13)
-	body.add_theme_color_override("default_color", Color(0.85, 0.90, 0.85))
+	body.add_theme_color_override("default_color", Color(0.35, 0.90, 0.50))
 	body.scroll_active = false
-	card.add_child(body)
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.add_child(body)
+
+	# Cursor piscante
+	var cursor := Label.new()
+	cursor.text = "█"
+	cursor.position = Vector2(16, dev_h - 34)
+	cursor.add_theme_font_size_override("font_size", 12)
+	cursor.add_theme_color_override("font_color", Color(0.35, 0.90, 0.50, 0.9))
+	screen.add_child(cursor)
 
 	# Rodapé
 	var footer := Label.new()
-	footer.text = "[ ESPAÇO ou CLIQUE para continuar ]"
-	footer.position = Vector2(24, 338)
-	footer.add_theme_font_size_override("font_size", 11)
-	footer.add_theme_color_override("font_color", Color(0.45, 0.55, 0.50))
-	card.add_child(footer)
+	footer.text = "[ ESPAÇO / CLIQUE ]"
+	footer.position = Vector2(dev_w - 160, dev_h - 18)
+	footer.add_theme_font_size_override("font_size", 9)
+	footer.add_theme_color_override("font_color", Color(0.25, 0.55, 0.35, 0.6))
+	screen.add_child(footer)
 
-	# Slides de conteúdo
+	# Indicador de slide
+	var slide_ind := Label.new()
+	slide_ind.position = Vector2(12, dev_h - 18)
+	slide_ind.add_theme_font_size_override("font_size", 9)
+	slide_ind.add_theme_color_override("font_color", Color(0.25, 0.55, 0.35, 0.6))
+	screen.add_child(slide_ind)
+
+	# ── Slides ──
+	var g := "[color=#50ff80]"
+	var r := "[color=#ff6060]"
+	var y := "[color=#d0c040]"
+	var w := "[color=#c0d0c8]"
 	var slides: Array[String] = [
-		"[b]OPERAÇÃO:[/b] [color=#c8a028]EFEITO BORBOLETA[/color]  ·  Ref. 14.7-F / Linha Alfa-3\n\n[b]ANOMALIA DETECTADA:[/b]\nO Rei Aldemar I governa esta aldeia com mão de ferro.\nProjeção da Agência: em 30 dias ele declarará guerra aos reinos vizinhos.\nA região inteira será destruída.\n\nSua presença aqui já alterou a linha do tempo.\n[i]O que você fizer com os próximos 3 dias é o que importa.[/i]",
-		"[b]ALVO:[/b] [color=#e06060]REI ALDEMAR I[/color]  —  Castelo ao Norte\n\n[b]COMO REMOVÊ-LO:[/b]\nNão pela força — isso criaria um mártir.\nNão pela fuga — ele voltaria com exército.\n\n[color=#80c080]Instabilidade Social[/color] é sua arma.\nQuando a população perder a fé no rei [b](Instabilidade ≥ 100)[/b],\nela própria o derruba. Sua missão: chegar lá em [b]3 dias[/b].",
-		"[b]SUAS FERRAMENTAS:[/b]\n\n[color=#80b0e0]● Pegar objeto (clique)[/color]  —  mova coisas pelo mapa, custos 1 PA\n[color=#80b0e0]● Soltar com narrativa (clique)[/color]  —  escreva o boato, 1 PA\n[color=#80b0e0]● Sussurrar para NPC (clique)[/color]  —  posicione-se atrás, 1 PA\n\nVocê tem [b]3 PA por dia[/b]. Gaste bem.\n\n[color=#a0a040]Atenção:[/color] Guardas que te vejam agem suspeitos.\nSe a perseguição começar — corra."
+		"> OPERAÇÃO: %sEFEITO BORBOLETA[/color]\n> REF: 14.7-F / LINHA ALFA-3\n> STATUS: %sATIVO[/color]\n\n%sANOMALIA DETECTADA:[/color]\nRei Aldemar I — governante local.\nProjeção: em 30 dias declarará guerra.\nA região será destruída.\n\n%sSua presença já alterou a linha do tempo.[/color]\n%sO que você fizer nos próximos 3 dias decide tudo.[/color]" % [y, g, r, w, w],
+		"> ALVO: %sREI ALDEMAR I[/color]\n> LOCALIZAÇÃO: Castelo — extremo norte\n> PRIORIDADE: %sMÁXIMA[/color]\n\n%sDIRETRIZ DA AGÊNCIA:[/color]\nNão use violência — criaria um mártir.\nNão tente fuga — ele voltaria com exército.\n\nSua arma: %sInstabilidade Social[/color].\nQuando a população perder a fé no rei\n(Instabilidade >= 100), ela o derruba.\n\nPrazo: %s3 DIAS[/color]." % [r, r, w, g, y],
+		"> FERRAMENTAS DISPONÍVEIS:\n\n%s[PEGAR OBJETO][/color] — clique perto de um objeto\n  Mova-o para outro local. Custo: 1 PA.\n\n%s[SOLTAR + NARRATIVA][/color] — clique para soltar\n  Escreva o boato. Custo: 1 PA.\n\n%s[SUSSURRAR][/color] — posicione-se atrás de um NPC\n  Pressione E. Custo: 1 PA.\n\n> ORÇAMENTO DIÁRIO: %s3 PA[/color]\n> %sALERTA:[/color] Guardas suspeitos perseguem." % [g, g, g, y, r],
 	]
 
-	# Fade in do overlay
+	# ── Fade in ──
+	Sfx.play("portal_open")
 	var tw_in := create_tween()
-	tw_in.tween_property(overlay, "color:a", 0.88, 0.3)
+	tw_in.tween_property(overlay, "color:a", 1.0, 0.5)
 	await tw_in.finished
 
 	var slide_idx := 0
 	var skip := false
-	var dismiss := false
 
-	# Input para pular
+	# Input para avançar
 	var inp := ColorRect.new()
 	inp.color = Color(0, 0, 0, 0)
 	inp.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -711,9 +835,15 @@ func _show_briefing_overlay() -> void:
 			skip = true)
 	inp.grab_focus()
 
-	while slide_idx < slides.size() and not dismiss:
+	# Tween para cursor piscante
+	var cursor_tw := create_tween().set_loops()
+	cursor_tw.tween_property(cursor, "modulate:a", 0.0, 0.4)
+	cursor_tw.tween_property(cursor, "modulate:a", 1.0, 0.4)
+
+	while slide_idx < slides.size():
 		skip = false
 		body.text = ""
+		slide_ind.text = "[%d/%d]" % [slide_idx + 1, slides.size()]
 		Sfx.play("bip")
 		var full_text: String = slides[slide_idx]
 		var chars_shown := 0
@@ -721,28 +851,41 @@ func _show_briefing_overlay() -> void:
 		while chars_shown < chars_total and not skip:
 			chars_shown = mini(chars_shown + 2, chars_total)
 			body.text = full_text.left(chars_shown)
-			if chars_shown % 8 == 0:
+			if chars_shown % 10 == 0:
 				Sfx.play("clack")
-			await get_tree().create_timer(0.025).timeout
+			await get_tree().create_timer(0.02).timeout
 		body.text = full_text
-		# Aguarda input para avançar
+		# Aguarda input
 		skip = false
 		var wait_t := 0.0
-		while not skip and wait_t < 8.0:
+		while not skip and wait_t < 10.0:
 			wait_t += 0.05
 			await get_tree().create_timer(0.05).timeout
 		slide_idx += 1
 		if slide_idx < slides.size():
 			Sfx.play("whoosh")
-			var tw_slide := create_tween()
-			tw_slide.tween_property(body, "modulate:a", 0.0, 0.15)
-			await tw_slide.finished
+			var tw_s := create_tween()
+			tw_s.tween_property(body, "modulate:a", 0.0, 0.12)
+			await tw_s.finished
 			body.modulate.a = 1.0
 
-	# Fade out
+	# ── Desligar visor ──
+	cursor_tw.kill()
+	cursor.visible = false
 	Sfx.play("confirm")
+	# Flash branco na tela do dispositivo
+	var flash := ColorRect.new()
+	flash.color = Color(0.5, 1.0, 0.6, 0.8)
+	flash.size = Vector2(dev_w, dev_h)
+	flash.position = Vector2(dev_x, dev_y)
+	overlay.add_child(flash)
+	var tw_flash := create_tween()
+	tw_flash.tween_property(flash, "color:a", 0.0, 0.3)
+	tw_flash.tween_property(screen, "color", Color(0.0, 0.0, 0.0, 1.0), 0.2)
+	await tw_flash.finished
+	# Fade out total
 	var tw_out := create_tween()
-	tw_out.tween_property(overlay, "color:a", 0.0, 0.4)
+	tw_out.tween_property(overlay, "modulate:a", 0.0, 0.6)
 	await tw_out.finished
 	overlay.queue_free()
 	mission_panel.visible = true
