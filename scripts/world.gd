@@ -61,6 +61,7 @@ var snapshot := {}
 var rings: Array = []
 var _active_event_current: Dictionary = {}
 var _active_event_queue: Array = []
+var _last_action_effect := true  # setado por _apply_action_specific, lido por _did_action_succeed
 var _phase_before_confrontation: int = Phase.ACTION
 var village: Village
 var villagers: Array = []
@@ -1026,12 +1027,24 @@ func trigger_active_event(params: Dictionary) -> Dictionary:
 	return Game.create_active_event(params)
 
 
-func _try_resolve_active_event(action_id: String) -> void:
+func _try_resolve_active_event(action_id: String, target_npc: NPC = null) -> void:
 	if _active_event_current.is_empty():
 		return
 	var accepted: Array = _active_event_current.get("success_actions", [])
-	if accepted.has(action_id):
-		resolve_current_event(true)
+	if not accepted.has(action_id):
+		return
+	if not _did_action_succeed(action_id, target_npc):
+		return
+	resolve_current_event(true)
+
+
+func _did_action_succeed(action_id: String, target_npc: NPC) -> bool:
+	match action_id:
+		"destroy_evidence", "ask_help", "incriminate":
+			# _apply_action_specific seta _last_action_effect antes de _try_resolve rodar
+			return _last_action_effect
+		_:
+			return true
 
 
 func _dispatch(e: Dictionary) -> void:
@@ -1604,8 +1617,9 @@ func execute_action(action_id: String, target_npc: NPC = null, target_obj: World
 		_apply_noise(player.global_position, noise)
 	if susp != 0.0:
 		_apply_suspicion_burst(player.global_position, susp)
+	_last_action_effect = true  # reset antes de _apply_action_specific sobrescrever
 	_apply_action_specific(action_id, target_npc, target_obj)
-	_try_resolve_active_event(action_id)
+	_try_resolve_active_event(action_id, target_npc)
 	_evaluate_chain_events()
 	if phase == Phase.ACTION:
 		var pending_events := Game.get_pending_active_events()
@@ -1725,6 +1739,9 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 				Game.bump(target_npc.id, "loyalty", -15.0)
 				hud.toast("Evidência plantada contra %s." % str(target_npc.def.get("name", "")), 3.0)
 				Sfx.play("confirm")
+				_last_action_effect = true
+			else:
+				_last_action_effect = false
 		"protect":
 			if target_npc:
 				Game.bump(target_npc.id, "loyalty", 20.0)
@@ -1745,21 +1762,25 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 					target_npc.show_emote("<3", 2.0)
 					Game.bump(target_npc.id, "loyalty", -10.0)
 					hud.toast("%s está do seu lado." % str(target_npc.def.get("name", "")), 3.0)
+					_last_action_effect = true
 				else:
 					target_npc.say("Não tenho o que falar com você.", 3.0)
 					target_npc.show_emote("...", 2.0)
 					hud.toast("%s recusou ajuda." % str(target_npc.def.get("name", "")), 3.0)
+					_last_action_effect = false
 		"destroy_evidence":
 			var loc_ev := Game.get_evidence_at(loc)
 			if loc_ev.is_empty():
 				hud.toast("Não há pistas para destruir aqui.", 2.5)
 				Game.refund_ap(1)
+				_last_action_effect = false
 			else:
 				var ev: Dictionary = loc_ev[0]
 				Game.destroy_evidence(ev.id)
 				hud.toast("Pista destruída: %s" % ev.description.left(40), 3.0)
 				Sfx.play("confirm")
 				emit_particle("smoke_thin", player.global_position)
+				_last_action_effect = true
 		"flee":
 			player.set_emotion("PANIC")
 			Sfx.play("whoosh")

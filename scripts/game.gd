@@ -233,33 +233,41 @@ enum EventState { LOCKED, AVAILABLE, ACTIVE, RESOLVED, FAILED, CANCELLED }
 var EVENT_DEFS := {
 	"weapon_found": {
 		"title": "Arma Encontrada",
+		# Unlock: um objeto marcado como arma foi colocado num local público.
+		# Sucesso: há evidência contra alguém (não apenas o contador genérico).
 		"description": "Uma arma foi encontrada num local inesperado — os moradores começam a cochichar.",
 		"involved_npcs": ["npc_guard", "npc_smith"],
 		"unlock": "evidence_type:object_placed:arma",
-		"success": "evidence_count:2",
+		"success": "evidence_against_king:1",
 		"on_resolve": ["unlock:suspect_accused"],
 		"duration": 15.0,
 	},
 	"suspect_accused": {
 		"title": "Suspeito Acusado",
+		# Sucesso: a lealdade do guarda caiu (ele não mais defende o rei cegamente)
+		# e há evidência contra o rei — há um suspeito real.
 		"description": "Os moradores apontam um culpado. O guarda começa a interrogar.",
 		"involved_npcs": ["npc_guard", "npc_baker"],
 		"unlock": "event_resolved:weapon_found",
-		"success": "evidence_count:3",
+		"success": "multi:evidence_against_king:1,npc_loyalty_below:npc_guard:70",
 		"on_resolve": ["unlock:guard_interrogates"],
 		"duration": 20.0,
 	},
 	"guard_interrogates": {
 		"title": "Guarda Interroga",
+		# Sucesso: o guarda está com raiva/suspeita elevada E a lealdade caiu ainda mais,
+		# indicando que ele realmente investiga — não apenas patrulha.
 		"description": "Bram abandona o portão para investigar o acusado na praça.",
 		"involved_npcs": ["npc_guard"],
 		"unlock": "event_resolved:suspect_accused",
-		"success": "evidence_count:4",
+		"success": "multi:npc_loyalty_below:npc_guard:55,npc_suspicion:npc_guard:35",
 		"on_resolve": ["unlock:witness_appears", "set:guard_distracted"],
 		"duration": 25.0,
 	},
 	"witness_appears": {
 		"title": "Testemunha Aparece",
+		# Sucesso: o jogador não está exposto (evidência contra ele abaixo de 40).
+		# Falha: jogador virou o principal suspeito.
 		"description": "Alguém afirma ter visto o verdadeiro culpado — ou o jogador. A pressão aumenta.",
 		"involved_npcs": ["villager_elder", "npc_priestess"],
 		"unlock": "event_resolved:guard_interrogates",
@@ -271,19 +279,22 @@ var EVENT_DEFS := {
 	},
 	"diversion_needed": {
 		"title": "Desviar a Investigação",
+		# Sucesso: o guarda está distraído (flag setada pela IA ou pelo handler do boato)
+		# — não um contador arbitrário de instabilidade.
 		"description": "O jogador precisa criar uma distração ou plantar provas para desviar a suspeita.",
 		"involved_npcs": [],
 		"unlock": "event_resolved:witness_appears",
-		"success": "instability:60",
+		"success": "flag:guard_distracted",
 		"on_resolve": ["unlock:guard_leaves_post"],
 		"duration": 30.0,
 	},
 	"guard_leaves_post": {
 		"title": "Guarda Abandona o Portão",
+		# Sucesso: o portão está de fato desguarnecido (flag setada pelo handler).
 		"description": "A confusão é tanta que Bram não consegue ficar parado. O portão está desprotegido.",
 		"involved_npcs": ["npc_guard"],
 		"unlock": "event_resolved:diversion_needed",
-		"success": "flag:guard_distracted",
+		"success": "flag:gate_unguarded",
 		"on_resolve": ["unlock:gate_passage", "set:gate_unguarded"],
 		"duration": 15.0,
 	},
