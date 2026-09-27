@@ -928,6 +928,10 @@ func _begin_next_active_event() -> void:
 
 
 func _spawn_event_npcs(ev: Dictionary) -> void:
+	# skip_spawn: true quando o handler do evento já posicionou os NPCs manualmente,
+	# ou quando mover para ev.location quebraria a lógica da oportunidade criada.
+	if ev.get("skip_spawn", false):
+		return
 	for nid in ev.npc_ids:
 		var npc: NPC = npcs.get(nid)
 		if not npc:
@@ -1827,11 +1831,12 @@ func _apply_event_effects(event_id: String) -> void:
 				"objective": "Aproveite a ausência do guarda para cruzar o portão",
 				"duration": 22.0, "risk": 40.0,
 				"npc_ids": ["npc_guard", "villager_elder"],
-			"hint": "Cuidado com o Ancião Osric observando",
-			"consequences": "O guarda vai voltar em breve",
-			"location": "castle_gate",
-			"success_actions": [],
-			"success_action": "",
+				"hint": "Cuidado com o Ancião Osric observando",
+				"consequences": "O guarda vai voltar em breve",
+				"location": "castle_gate",
+				"skip_spawn": true,
+				"success_actions": [],
+				"success_action": "",
 				"fail_action": "bump:npc_guard:anger:15",
 			})
 		"witness_appears":
