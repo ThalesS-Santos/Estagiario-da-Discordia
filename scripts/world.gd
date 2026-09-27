@@ -49,6 +49,7 @@ var hovered_obj = null
 var hovered_npc = null
 var cam_target := Vector2(640, 380)
 var follow = null
+var _shadowing_npc: NPC = null  # NPC que o jogador está seguindo (ação "follow")
 var cam_zoom := 1.0
 var sim_events: Array = []
 var sim_time := 0.0
@@ -460,6 +461,7 @@ func _start_day() -> void:
 	clock = 8.0
 	sim_running = false
 	follow = null
+	_shadowing_npc = null
 	actions_today.clear()
 	Game.reset_ap()
 	for id in npcs:
@@ -645,6 +647,7 @@ func _left_click() -> void:
 	var mp := get_global_mouse_position()
 	if phase == Phase.SIM:
 		follow = null
+		_shadowing_npc = null
 		cam_target = mp
 		return
 	# Pegar/soltar agora é do PlayerIntern; aqui só resta fixar o card do NPC clicado.
@@ -674,7 +677,12 @@ func _right_click() -> void:
 	if phase == Phase.PURSUIT:
 		return
 	var mp := get_global_mouse_position()
-	_open_action_menu(_npc_at(mp), _obj_at(mp))
+	var npc_target := _npc_at(mp)
+	# Interação com NPC exige que o jogador esteja a menos de 200 px
+	if npc_target and player.global_position.distance_to(npc_target.global_position) > 200.0:
+		hud.toast("Muito longe de %s." % str(npc_target.def.get("name", "NPC")), 2.0)
+		return
+	_open_action_menu(npc_target, _obj_at(mp))
 
 
 func _open_action_menu(target_npc: NPC = null, target_obj: WorldObject = null) -> void:
@@ -875,13 +883,17 @@ func _finish_sim() -> void:
 		return
 	sim_running = false
 	_evaluate_chain_events()
-	if Game.instability >= 100.0:
+	# Vitória por revolta: instabilidade só conta se o rei foi deposto pela cadeia de eventos.
+	# Instabilidade alta sem king_deposed é pressão acumulada, não vitória.
+	var king_deposed := Game.get_event_state("king_deposed") == Game.EventState.RESOLVED
+	if Game.instability >= 100.0 and king_deposed:
 		phase = Phase.ENDED
 		await _victory_sequence()
 		victory.emit()
 	elif _ending_day:
 		phase = Phase.ENDED
 		if Game.day >= Game.MAX_DAYS:
+			_set_defeat_reason()
 			await _defeat_sequence()
 			defeat.emit()
 		else:
@@ -1239,12 +1251,36 @@ func _victory_sequence() -> void:
 	await get_tree().create_timer(0.6).timeout
 
 
+var _defeat_reason := ""
+
+func _set_defeat_reason() -> void:
+	var gate_done := Game.get_event_state("gate_passage") == Game.EventState.RESOLVED
+	var king_done := Game.get_event_state("king_deposed") == Game.EventState.RESOLVED
+	var guard_left := bool(Game.event_flags.get("gate_unguarded", false))
+	var guard_dist := bool(Game.event_flags.get("guard_distracted", false))
+	if gate_done or king_done:
+		_defeat_reason = ""  # não deve chegar aqui, mas por segurança
+	elif not guard_dist and not guard_left:
+		_defeat_reason = "Bram não saiu do posto. O portão nunca ficou desprotegido."
+	elif guard_left and not bool(Game.event_flags.get("player_crossed_gate", false)):
+		_defeat_reason = "O portão abriu, mas você não cruzou a tempo."
+	elif Game.get_event_state("witness_appears") == Game.EventState.FAILED:
+		_defeat_reason = "Você virou o principal suspeito. A missão foi abortada."
+	elif Game.get_event_state("guard_interrogates") != Game.EventState.RESOLVED:
+		_defeat_reason = "Bram nunca começou a investigar. Faltou evidência contra alguém."
+	else:
+		_defeat_reason = "Os 3 dias passaram sem que o rei fosse deposto."
+
+
 func _defeat_sequence() -> void:
 	hud.set_ui_visible(false)
 	cam_target = Vector2(640, 200)
 	var k: NPC = npcs["npc_king"]
 	k.position = Vector2(640, 168)
-	k.say("Nenhum boato derruba esta coroa. A ordem está restaurada.", 5.0)
+	var king_msg := "Nenhum boato derruba esta coroa. A ordem está restaurada."
+	k.say(king_msg, 5.0)
+	var reason := _defeat_reason if _defeat_reason != "" else "Anomalia não contida."
+	hud.subtitle("Agência Panóptico", reason)
 	for id in npcs:
 		if id != "npc_king":
 			npcs[id].walk_to(npcs[id].home)
@@ -1715,8 +1751,21 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 			Sfx.play("confirm")
 		"follow":
 			if target_npc:
+				_shadowing_npc = target_npc
 				player.set_emotion("SUSPICIOUS")
-				hud.toast("Seguindo %s..." % str(target_npc.def.get("name", "")), 2.5)
+				hud.toast("Seguindo %s... (clique direito para parar)" % str(target_npc.def.get("name", "")), 3.0)
+				# Seguir revela a rotina: cria evidência de overheard depois de 4 s
+				get_tree().create_timer(4.0).timeout.connect(func():
+					if _shadowing_npc == target_npc and is_instance_valid(target_npc):
+						var dist2 := player.global_position.distance_to(target_npc.global_position)
+						if dist2 < 120.0:
+							var saved: Dictionary = Game.npc_state.get(target_npc.id, {})
+							var dest: String = str(saved.get("destination", ""))
+							var info := "Observou %s se dirigindo a %s." % [str(target_npc.def.get("name", "")), dest if dest != "" else "lugar desconhecido"]
+							Game.create_evidence("overheard", Game.nearest_location(player.global_position), info, 8.0, "", "", target_npc.id)
+							hud.toast("Descobriu rotina de %s." % str(target_npc.def.get("name", "")), 3.0)
+						_shadowing_npc = null
+				)
 		"confront":
 			if target_npc:
 				player.set_emotion("NERVOUS")
@@ -1752,8 +1801,24 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 				target_npc.show_emote("<3", 2.0)
 				hud.toast("Você protegeu %s." % str(target_npc.def.get("name", "")), 3.0)
 		"hide":
-			player.set_emotion("NERVOUS")
-			hud.toast("Escondido... suspeita reduzida.", 2.5)
+			# Esconder exige estar perto de um objeto (cobertura) ou longe de todos os NPCs
+			var nearest_npc_dist := 9999.0
+			for n: NPC in npcs.values() + villagers:
+				if n.visible and is_instance_valid(n):
+					nearest_npc_dist = minf(nearest_npc_dist, n.global_position.distance_to(player.global_position))
+			var has_cover := false
+			for id in objects:
+				var o: WorldObject = objects[id]
+				if o != held and o.global_position.distance_to(player.global_position) < 48.0:
+					has_cover = true
+					break
+			if nearest_npc_dist > 180.0 or has_cover:
+				player.set_emotion("NERVOUS")
+				hud.toast("Escondido... suspeita reduzida.", 2.5)
+			else:
+				hud.toast("Sem cobertura perto — NPCs ainda podem te ver.", 2.5)
+				Game.refund_ap(0)  # custo 0, mas o efeito não se aplica; cancela a ação
+				return
 		"ask_help":
 			if target_npc:
 				var loyalty: float = float(Game.npc_state.get(target_npc.id, {}).get("loyalty", 100))
@@ -1764,9 +1829,12 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 					hud.toast("%s está do seu lado." % str(target_npc.def.get("name", "")), 3.0)
 					_last_action_effect = true
 				else:
+					# Recusa: o NPC fica com mais suspeita e pode denunciar
 					target_npc.say("Não tenho o que falar com você.", 3.0)
-					target_npc.show_emote("...", 2.0)
-					hud.toast("%s recusou ajuda." % str(target_npc.def.get("name", "")), 3.0)
+					target_npc.show_emote("!", 2.0)
+					target_npc.add_suspicion(15.0)
+					Game.bump(target_npc.id, "anger", 10.0)
+					hud.toast("%s recusou e ficou desconfiado." % str(target_npc.def.get("name", "")), 3.5)
 					_last_action_effect = false
 		"destroy_evidence":
 			var loc_ev := Game.get_evidence_at(loc)
