@@ -93,5 +93,3 @@ Para o histórico de decisões de design e técnica, veja [`CLAUDE.md`](CLAUDE.m
 - IA: Google Gemini.
 
 ## Licença
-
-Código e arte gerada do projeto: defina a licença antes de publicar (sugestão: MIT para o código). Pacotes Kenney: CC0.
