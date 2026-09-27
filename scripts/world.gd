@@ -294,7 +294,7 @@ func _on_caos_gerado(data: Dictionary) -> void:
 		if dialogue != "":
 			Game.add_memory(npc.id, dialogue)
 			hud.subtitle(npc_name, dialogue)
-			hud.add_event_log("%s: \"%s\"" % [npc_name, dialogue.substr(0, 60)])
+			hud.add_event_log("%s: \"%s\"" % [npc_name, dialogue])
 	Game.apply_npc_updates(data.npc_updates)
 	for directive: Dictionary in data.npc_updates:
 		if directive.has("suspicion_delta") and directive.suspicion_delta != 0:

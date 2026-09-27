@@ -546,10 +546,14 @@ func hide_action_menu() -> void:
 	action_panel.visible = false
 
 
-# ---- fila de eventos (colapsável) ------------------------------------------
+# ---- fila de eventos (colapsável, com rolagem) -----------------------------
+const EVENT_LOG_MAX := 80
+const EVENT_LOG_SIZE := Vector2(300, 176)
 var _event_log_expanded := false
 var _event_log_btn: Button
-var _event_log_content: Control
+var _event_log_scroll: ScrollContainer
+var _event_log_count := 0
+var _event_log_unread := 0
 
 func _build_event_log() -> void:
 	var container := Control.new()
@@ -571,6 +575,7 @@ func _build_event_log() -> void:
 	_set_9slice_margins(sb_h, 4)
 	_event_log_btn.add_theme_stylebox_override("normal", sb_n)
 	_event_log_btn.add_theme_stylebox_override("hover", sb_h)
+	_event_log_btn.add_theme_stylebox_override("pressed", sb_h)
 	_event_log_btn.add_theme_font_size_override("font_size", 11)
 	_event_log_btn.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
 	_event_log_btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 0.6))
@@ -578,53 +583,117 @@ func _build_event_log() -> void:
 	_event_log_btn.mouse_entered.connect(func(): Sfx.play("bip"))
 	container.add_child(_event_log_btn)
 	# Painel expandível
-	event_log_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(240, 120))
+	event_log_panel = _9patch(tex_panel, [4, 4, 4, 4], EVENT_LOG_SIZE)
+	event_log_panel.size = EVENT_LOG_SIZE
 	event_log_panel.position = Vector2(0, 28)
 	event_log_panel.visible = false
-	event_log_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	container.add_child(event_log_panel)
-	_event_log_content = event_log_panel
-	var clip := Control.new()
-	clip.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
-	clip.position = Vector2(8, 6)
-	clip.size = Vector2(224, 108)
-	clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	event_log_panel.add_child(clip)
+	_event_log_scroll = ScrollContainer.new()
+	_event_log_scroll.position = Vector2(8, 8)
+	_event_log_scroll.size = EVENT_LOG_SIZE - Vector2(14, 16)
+	_event_log_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_event_log_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	_event_log_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	_style_scrollbar(_event_log_scroll.get_v_scroll_bar())
+	event_log_panel.add_child(_event_log_scroll)
 	event_log_box = VBoxContainer.new()
-	event_log_box.add_theme_constant_override("separation", 2)
+	event_log_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	event_log_box.add_theme_constant_override("separation", 5)
 	event_log_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	clip.add_child(event_log_box)
+	_event_log_scroll.add_child(event_log_box)
+	_event_log_placeholder()
+
+
+func _style_scrollbar(sb: VScrollBar) -> void:
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.02, 0.03, 0.05, 0.9)
+	track.content_margin_left = 3
+	track.content_margin_right = 3
+	var grab := StyleBoxFlat.new()
+	grab.bg_color = Color(0.75, 0.6, 0.25)
+	grab.border_color = Color(0.25, 0.15, 0.1)
+	grab.set_border_width_all(1)
+	var grab_h := grab.duplicate() as StyleBoxFlat
+	grab_h.bg_color = Color(1.0, 0.85, 0.35)
+	sb.add_theme_stylebox_override("scroll", track)
+	sb.add_theme_stylebox_override("scroll_focus", track)
+	sb.add_theme_stylebox_override("grabber", grab)
+	sb.add_theme_stylebox_override("grabber_highlight", grab_h)
+	sb.add_theme_stylebox_override("grabber_pressed", grab_h)
+	sb.custom_minimum_size.x = 8
+
+
+func _event_log_placeholder() -> void:
+	var l := _label("Nada aconteceu ainda.", 11, Color(0.5, 0.6, 0.55))
+	l.name = "Placeholder"
+	event_log_box.add_child(l)
 
 
 func _toggle_event_log() -> void:
 	_event_log_expanded = not _event_log_expanded
-	_event_log_content.visible = _event_log_expanded
-	_event_log_btn.text = "▾ EVENTOS" if _event_log_expanded else "▸ EVENTOS"
+	event_log_panel.visible = _event_log_expanded
+	if _event_log_expanded:
+		_event_log_unread = 0
+		_scroll_event_log_to_end.call_deferred()
+	_update_event_log_btn()
 	Sfx.play("clack")
+
+
+func _update_event_log_btn() -> void:
+	var arrow := "▾" if _event_log_expanded else "▸"
+	_event_log_btn.text = "%s EVENTOS" % arrow if _event_log_unread == 0 else "%s EVENTOS (%d)" % [arrow, _event_log_unread]
 
 
 func add_event_log(text: String) -> void:
 	_event_log.append(text)
-	if _event_log.size() > 20:
-		_event_log = _event_log.slice(-20)
-	_refresh_event_log()
-	# Pulso no botão para indicar novo evento
-	if not _event_log_expanded and is_instance_valid(_event_log_btn):
+	_event_log_count += 1
+	var ph := event_log_box.get_node_or_null("Placeholder")
+	if ph:
+		ph.queue_free()
+	# a entrada anterior esmaece; a nova fica em destaque
+	var kids := event_log_box.get_children()
+	if not kids.is_empty():
+		(kids.back() as Control).modulate = Color(0.78, 0.8, 0.8)
+	event_log_box.add_child(_event_log_entry(_event_log_count, text))
+	while event_log_box.get_child_count() > EVENT_LOG_MAX:
+		var old := event_log_box.get_child(0)
+		event_log_box.remove_child(old)
+		old.queue_free()
+	if _event_log.size() > EVENT_LOG_MAX:
+		_event_log = _event_log.slice(-EVENT_LOG_MAX)
+	if _event_log_expanded:
+		_scroll_event_log_to_end.call_deferred()
+	else:
+		_event_log_unread += 1
+		_update_event_log_btn()
 		var tw := create_tween()
 		tw.tween_property(_event_log_btn, "modulate", Color(1.5, 1.2, 0.5), 0.15)
 		tw.tween_property(_event_log_btn, "modulate", Color(1, 1, 1), 0.4)
 
 
-func _refresh_event_log() -> void:
-	for c in event_log_box.get_children():
-		c.queue_free()
-	var visible_events := _event_log.slice(maxi(_event_log.size() - 6, 0))
-	for i in visible_events.size():
-		var idx := _event_log.size() - visible_events.size() + i + 1
-		var lbl := _label("[%d] %s" % [idx, visible_events[i]], 10, Color(0.75, 0.85, 0.8))
-		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		lbl.custom_minimum_size.x = 218
-		event_log_box.add_child(lbl)
+func _event_log_entry(idx: int, text: String) -> RichTextLabel:
+	var r := RichTextLabel.new()
+	r.bbcode_enabled = true
+	r.fit_content = true
+	r.scroll_active = false
+	r.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	r.mouse_filter = Control.MOUSE_FILTER_PASS
+	r.add_theme_font_size_override("normal_font_size", 11)
+	r.add_theme_font_size_override("bold_font_size", 11)
+	r.add_theme_color_override("default_color", Color(0.85, 0.92, 0.88))
+	var safe := text.replace("[", "[lb]")
+	var cut := safe.find(": ")
+	if cut > 0 and cut < 28:
+		safe = "[color=#ffd76a]%s[/color]%s" % [safe.substr(0, cut + 1), safe.substr(cut + 1)]
+	r.text = "[color=#6f8a80]%d.[/color] %s" % [idx, safe]
+	return r
+
+
+func _scroll_event_log_to_end() -> void:
+	await get_tree().process_frame
+	var bar := _event_log_scroll.get_v_scroll_bar()
+	_event_log_scroll.scroll_vertical = int(bar.max_value)
 
 
 # ---- cadeia causal ----------------------------------------------------------
@@ -1608,7 +1677,7 @@ func set_hover(o, n) -> void:
 				memory_box.add_child(ml)
 		var content: Control = card.get_child(1)
 		card.size = Vector2(256, maxf(content.get_combined_minimum_size().y, 60.0))
-		card.position = Vector2(12, 720 - 64 - card.size.y)
+		card.position = Vector2(12.0 if not _event_log_expanded else 322.0, 720 - 64 - card.size.y)
 	else:
 		card.visible = false
 	if o:
