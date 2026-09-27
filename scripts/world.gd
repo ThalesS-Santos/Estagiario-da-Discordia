@@ -63,6 +63,7 @@ var rings: Array = []
 var _active_event_current: Dictionary = {}
 var _active_event_queue: Array = []
 var _last_action_effect := true  # setado por _apply_action_specific, lido por _did_action_succeed
+var _tension_t := 0.0
 var _phase_before_confrontation: int = Phase.ACTION
 var village: Village
 var villagers: Array = []
@@ -1344,6 +1345,13 @@ func emit_particle(kind: String, pos: Vector2) -> void:
 # ------------------------------------------------------------------ frame
 func _process(delta: float) -> void:
 	time += delta
+	if phase == Phase.PURSUIT:
+		_tension_t -= delta
+		if _tension_t <= 0.0:
+			Sfx.play("tension")
+			_tension_t = 0.85
+	else:
+		_tension_t = 0.0
 	if mission and (phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT):
 		mission.tick(delta)
 	if phase == Phase.ACTIVE_EVENT:
