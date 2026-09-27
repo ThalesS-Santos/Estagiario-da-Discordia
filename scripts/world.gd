@@ -487,6 +487,7 @@ func _start_day() -> void:
 		m.position = Vector2(640, 960)
 		m.walk_to(Game.loc_pos("stall") + Vector2(0, 20))
 		m.home = Game.loc_pos("stall") + Vector2(0, 20)
+	var diff: Dictionary = Game.get_difficulty()
 	var guard: NPC = npcs["npc_guard"]
 	guard.position = Game.loc_pos("castle_gate") + Vector2(0, 14)
 	if diff.patrol_enabled:
@@ -497,7 +498,6 @@ func _start_day() -> void:
 		npc.anger = int(Game.npc_state[npc.id].anger)
 		npc.loyalty = int(Game.npc_state[npc.id].loyalty)
 		npc.ambient = true
-	var diff: Dictionary = Game.get_difficulty()
 	var base_susp := 0.0
 	if diff.recognition_enabled and Game.event_flags.get("player_caught", false):
 		base_susp = 15.0
