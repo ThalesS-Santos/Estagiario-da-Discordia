@@ -808,11 +808,11 @@ func evaluate_confrontation(choice_id: String, npc_id: String) -> Dictionary:
 
 
 # ---------- ações do jogador ----------
-func can_do_action(action_id: String, has_item := false, has_npc := false) -> Dictionary:
+func can_do_action(action_id: String, has_item := false, has_npc := false, ignore_ap := false) -> Dictionary:
 	if not ACTION_DEFS.has(action_id):
 		return {"ok": false, "reason": "Ação desconhecida."}
 	var def: Dictionary = ACTION_DEFS[action_id]
-	if int(def.cost) > ap:
+	if not ignore_ap and int(def.cost) > ap:
 		return {"ok": false, "reason": "PA insuficiente (%d necessário)." % def.cost}
 	if def.requires_npc and not has_npc:
 		return {"ok": false, "reason": "Precisa de um NPC alvo."}
@@ -825,10 +825,10 @@ func get_action_cost(action_id: String) -> int:
 	return int(ACTION_DEFS.get(action_id, {}).get("cost", 0))
 
 
-func get_available_actions(has_item: bool, has_npc: bool) -> Array:
+func get_available_actions(has_item: bool, has_npc: bool, ignore_ap := false) -> Array:
 	var result: Array = []
 	for aid in ACTION_DEFS:
-		var check := can_do_action(aid, has_item, has_npc)
+		var check := can_do_action(aid, has_item, has_npc, ignore_ap)
 		if check.ok:
 			var def: Dictionary = ACTION_DEFS[aid]
 			result.append({"id": aid, "name": def.name, "cost": def.cost,

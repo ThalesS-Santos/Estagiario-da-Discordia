@@ -678,9 +678,10 @@ func _right_click() -> void:
 
 func _open_action_menu(target_npc: NPC = null, target_obj: WorldObject = null) -> void:
 	var actions: Array = []
+	var free_ap := phase == Phase.ACTIVE_EVENT
 	if target_npc:
 		var npc_actions := ["observe", "listen", "gossip", "follow", "confront", "protect", "ask_help"]
-		for action in Game.get_available_actions(false, true):
+		for action in Game.get_available_actions(false, true, free_ap):
 			if npc_actions.has(action.id) and (phase == Phase.ACTION or action.id != "gossip"):
 				actions.append(action)
 	elif target_obj:
@@ -689,11 +690,11 @@ func _open_action_menu(target_npc: NPC = null, target_obj: WorldObject = null) -
 			object_actions.append("steal")
 		if target_obj.id == "sealed_letter":
 			object_actions.append("forge_letter")
-		for action in Game.get_available_actions(true, false):
+		for action in Game.get_available_actions(true, false, free_ap):
 			if object_actions.has(action.id):
 				actions.append(action)
 	elif phase == Phase.ACTIVE_EVENT:
-		for action in Game.get_available_actions(false, false):
+		for action in Game.get_available_actions(false, false, true):
 			if action.id in ["hide", "flee"] or (action.id == "destroy_evidence" and not Game.get_evidence_at(Game.nearest_location(player.global_position)).is_empty()):
 				actions.append(action)
 	if actions.is_empty():
@@ -1581,14 +1582,17 @@ func distract_pursuers(distraction_pos: Vector2, radius := 80.0) -> int:
 func execute_action(action_id: String, target_npc: NPC = null, target_obj: WorldObject = null) -> bool:
 	var has_npc := target_npc != null
 	var has_item := held != null or target_obj != null
-	var check := Game.can_do_action(action_id, has_item, has_npc)
+	# Durante eventos ativos o PA não é consumido: o evento é uma crise, não uma jogada.
+	# A validação de PA também é pulada para não bloquear as ações de resolução.
+	var in_active_event := phase == Phase.ACTIVE_EVENT
+	var check := Game.can_do_action(action_id, has_item, has_npc, in_active_event)
 	if not check.ok:
 		hud.toast(check.reason)
 		Sfx.play("error")
 		return false
 	var def: Dictionary = Game.ACTION_DEFS[action_id]
 	var cost: int = def.cost
-	if cost > 0:
+	if cost > 0 and not in_active_event:
 		Game.spend_ap(cost)
 	var noise: float = def.noise
 	var susp: float = def.suspicion

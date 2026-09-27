@@ -1398,8 +1398,13 @@ func set_sim(on: bool) -> void:
 
 func set_active_event_mode(on: bool) -> void:
 	end_btn.visible = not on
+	# Durante evento ativo as ações não custam PA — esconde as gemas para não confundir.
+	for gem: TextureRect in ap_gems:
+		gem.visible = not on
 	if on:
 		lbl_day.text = "DIA %d/%d — EVENTO ATIVO" % [Game.day, Game.MAX_DAYS]
+	else:
+		_update_gems(Game.ap)
 
 
 func set_ui_visible(v: bool) -> void:
