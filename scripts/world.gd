@@ -200,7 +200,7 @@ func _on_gossip_submitted(_context: Dictionary, text: String) -> void:
 
 
 func _request_caos(narrative: String) -> void:
-	if ai_waiting or gemini_director.is_processing or (held == null and gossip_npc == null):
+	if ai_waiting or gemini_director._busy or (held == null and gossip_npc == null):
 		return
 	var action: String
 	if held:

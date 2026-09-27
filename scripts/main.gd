@@ -160,9 +160,9 @@ class ButterflyEffectLoading extends Control:
 		for row in frame_data.size():
 			var line_str = frame_data[row]
 			for col in line_str.length():
-				var char = line_str[col]
-				if palette.has(char):
-					draw_rect(Rect2(b_x + col * p_size, b_y + row * p_size, p_size, p_size), palette[char])
+				var ch = line_str[col]
+				if palette.has(ch):
+					draw_rect(Rect2(b_x + col * p_size, b_y + row * p_size, p_size, p_size), palette[ch])
 
 
 class MenuBtn extends Button:

@@ -45,7 +45,7 @@ Uma acusação não é um fato comprovado; boatos sem evidência têm pouco efei
 """
 
 var api_key := "" # Deliberately not @export: avoid saving secrets in .tscn.
-var is_processing := false
+var _busy := false
 var _http: HTTPRequest
 var _request_id := 0
 var _npc_ids: Array = []
@@ -84,7 +84,7 @@ func _backend_url_valid() -> bool:
 
 
 func evaluate_butterfly_effect(player_action: String, gossip: String, npcs_state: Dictionary, context: Dictionary = {}) -> void:
-	if is_processing:
+	if _busy:
 		return # Ignore double-clicks without resetting the in-flight UI state.
 	if not is_node_ready() or not is_instance_valid(_http):
 		ai_error.emit("O diretor Gemini ainda não está pronto.")
@@ -116,7 +116,7 @@ func evaluate_butterfly_effect(player_action: String, gossip: String, npcs_state
 	_location_ids = allowed_locations.duplicate()
 	_request_id += 1
 	var request_id := _request_id
-	is_processing = true
+	_busy = true
 	var url := backend_url + "/simulate" if _using_backend \
 		else API_ROOT + model_name.uri_encode() + ":generateContent?key=" + api_key.uri_encode()
 	_last_url = url
@@ -161,7 +161,7 @@ func _retry_transport() -> bool:
 
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	if not is_processing:
+	if not _busy:
 		return
 	if result != HTTPRequest.RESULT_SUCCESS:
 		if _using_backend and _retry_transport():
@@ -256,9 +256,9 @@ func _validate_effect(data: Variant) -> Dictionary:
 			var raw_objective: Variant = raw_event.get("objective", "")
 			if typeof(raw_name) != TYPE_STRING or typeof(raw_objective) != TYPE_STRING:
 				continue
-			var name := str(raw_name).strip_edges().left(80)
+			var ev_name := str(raw_name).strip_edges().left(80)
 			var objective := str(raw_objective).strip_edges().left(120)
-			if name.is_empty() or objective.is_empty():
+			if ev_name.is_empty() or objective.is_empty():
 				continue
 			var npc_ids: Array[String] = []
 			var raw_ids: Variant = raw_event.get("npc_ids", [])
@@ -271,7 +271,7 @@ func _validate_effect(data: Variant) -> Dictionary:
 			if not _integer_in(duration, 5, 60) or not _integer_in(risk, 0, 100):
 				continue
 			clean_events.append({
-				"name": name, "objective": objective, "duration": float(duration), "risk": float(risk),
+				"name": ev_name, "objective": objective, "duration": float(duration), "risk": float(risk),
 				"npc_ids": npc_ids,
 				"hint": str(raw_event.get("hint", "")).strip_edges().left(120),
 				"consequences": str(raw_event.get("consequences", "")).strip_edges().left(120),
@@ -314,14 +314,14 @@ func _integer_in(value: Variant, minimum: int, maximum: int) -> bool:
 
 
 func _on_timeout(request_id: int) -> void:
-	if not is_processing or request_id != _request_id:
+	if not _busy or request_id != _request_id:
 		return
 	_http.cancel_request()
 	_fail("O Gemini excedeu 15 segundos de espera. Tente novamente.")
 
 
 func _finish_request() -> void:
-	is_processing = false
+	_busy = false
 	_request_id += 1 # Invalidate timers belonging to completed requests.
 	_npc_ids.clear()
 	_location_ids.clear()
@@ -333,7 +333,7 @@ func _fail(message: String) -> void:
 
 
 func cancel_pending() -> void:
-	if not is_processing:
+	if not _busy:
 		return
 	_http.cancel_request()
 	_fail("Requisição Gemini cancelada.")

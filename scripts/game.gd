@@ -720,7 +720,6 @@ const CONFRONTATION_CHOICES := {
 
 func get_available_confrontation_choices(npc_id: String, has_valuable: bool) -> Array:
 	var result: Array = []
-	var npc_data: Dictionary = npc_state.get(npc_id, {})
 	for cid in CONFRONTATION_CHOICES:
 		var choice: Dictionary = CONFRONTATION_CHOICES[cid]
 		var reqs: Dictionary = choice.requires

@@ -202,9 +202,9 @@ func get_up() -> void:
 	emote = ""
 
 
-func hurt_mood(anger: float, fear: float) -> void:
-	mood_anger = clampf(mood_anger + anger, 0.0, 1.0)
-	mood_fear = clampf(mood_fear + fear, 0.0, 1.0)
+func hurt_mood(anger_amt: float, fear_amt: float) -> void:
+	mood_anger = clampf(mood_anger + anger_amt, 0.0, 1.0)
+	mood_fear = clampf(mood_fear + fear_amt, 0.0, 1.0)
 
 
 func _in_water(p: Vector2) -> bool:
@@ -378,7 +378,7 @@ func _physics_process(delta: float) -> void:
 			var next := navigation_agent.get_next_path_position()
 			motion = global_position.direction_to(next)
 			var run_mult := (1.6 * pursue_speed_mult) if pursuing else (1.6 if running else 1.0)
-		velocity = motion * minf(speed * run_mult * sp, global_position.distance_to(next) / maxf(delta, 0.001))
+			velocity = motion * minf(speed * run_mult * sp, global_position.distance_to(next) / maxf(delta, 0.001))
 			var before := global_position
 			move_and_slide()
 			stuck_time = stuck_time + delta if global_position.distance_to(before) < 0.05 else 0.0

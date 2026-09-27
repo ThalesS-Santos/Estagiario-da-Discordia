@@ -742,14 +742,14 @@ func _build_top_left() -> void:
 	gem_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	inner.add_child(gem_row)
 	for i in 3:
-		var tr := TextureRect.new()
-		tr.texture = tex_gem
-		tr.custom_minimum_size = Vector2(24, 28)
-		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		gem_row.add_child(tr)
-		ap_gems.append(tr)
+		var gem := TextureRect.new()
+		gem.texture = tex_gem
+		gem.custom_minimum_size = Vector2(24, 28)
+		gem.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		gem.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		gem.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		gem_row.add_child(gem)
+		ap_gems.append(gem)
 	var ap_l := _label("AÇÃO", 10, Color(0.6, 0.8, 0.7))
 	gem_row.add_child(ap_l)
 	_update_gems(Game.ap)
@@ -757,14 +757,15 @@ func _build_top_left() -> void:
 
 
 func _update_gems(ap_val: int) -> void:
+	@warning_ignore("integer_division")
 	var gem_w: int = tex_gem.get_width() / 2
 	var gem_h: int = tex_gem.get_height()
 	for i in ap_gems.size():
-		var tr: TextureRect = ap_gems[i]
+		var gem: TextureRect = ap_gems[i]
 		var atlas := AtlasTexture.new()
 		atlas.atlas = tex_gem
 		atlas.region = Rect2(0 if i < ap_val else gem_w, 0, gem_w, gem_h)
-		tr.texture = atlas
+		gem.texture = atlas
 
 
 func _build_top_right() -> void:
