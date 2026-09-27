@@ -39,12 +39,58 @@ var pause_panel: Control
 var tutorial_panel: Control
 var flash_rect: ColorRect
 var alarm_rect: ColorRect
+# missão
+var mission_panel: NinePatchRect
+var mission_obj_label: Label
+var suspicion_panel: NinePatchRect
+var suspicion_bar: TextureProgressBar
+var opportunity_panel: NinePatchRect
+var opportunity_label: Label
+var opportunity_timer_label: Label
+var clue_popup: NinePatchRect
+var clue_popup_label: Label
+var clue_popup_desc: Label
+var clue_popup_tween: Tween
+var _opportunity_tween: Tween
+var active_event_panel: NinePatchRect
+var ae_name_label: Label
+var ae_obj_label: Label
+var ae_time_label: Label
+var ae_risk_bar: ColorRect
+var ae_risk_fill: ColorRect
+var ae_risk_label: Label
+var ae_hint_label: Label
+var ae_consequence_label: Label
+var ae_npcs_label: Label
+# confronto
+var confront_panel: NinePatchRect
+var confront_title: Label
+var confront_desc: Label
+var confront_buttons: Array = []
+var confront_result_label: Label
+var _confront_npc_id := ""
+var _confront_callback: Callable
+# ações contextuais
+var action_panel: NinePatchRect
+var action_title: Label
+var action_buttons: Array[Button] = []
+var _action_callback: Callable
+var briefing_panel: Control
 var pinned = null
 var pin_t := 0.0
 var toast_t := 0.0
 var sub_t := 0.0
 var alarm_t := 0.0
 var card_npc = null
+var card_susp_bar: StatBar
+var card_susp_val: Label
+# fila de eventos
+var event_log_box: VBoxContainer
+var event_log_panel: NinePatchRect
+var _event_log: Array[String] = []
+# cadeia causal
+var chain_panel: NinePatchRect
+var chain_vbox: VBoxContainer
 var tut_step := 0
 var _tex_cache: Dictionary = {}
 
@@ -102,6 +148,15 @@ func _ready() -> void:
 	_build_status()
 	_build_pause()
 	_build_loading()
+	_build_mission_panel()
+	_build_suspicion_panel()
+	_build_opportunity_panel()
+	_build_clue_popup()
+	_build_active_event_panel()
+	_build_confrontation_panel()
+	_build_action_menu()
+	_build_event_log()
+	_build_chain_panel()
 	Game.save_error.connect(func(message): toast(message, 6.0))
 
 	alarm_rect = ColorRect.new()
@@ -150,6 +205,459 @@ func _label(text: String, sz: int, col: Color) -> Label:
 	return l
 
 
+# ================================================================ MISSÃO UI
+func _build_mission_panel() -> void:
+	mission_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(220, 52))
+	mission_panel.position = Vector2(10, 96)
+	mission_panel.visible = false
+	ui.add_child(mission_panel)
+	var v := VBoxContainer.new()
+	v.set_anchors_preset(Control.PRESET_FULL_RECT)
+	v.add_theme_constant_override("separation", 2)
+	v.offset_left = 8
+	v.offset_top = 6
+	v.offset_right = -8
+	v.offset_bottom = -6
+	mission_panel.add_child(v)
+	var header := _label("MISSÃO", 10, Color(1.0, 0.82, 0.2))
+	v.add_child(header)
+	mission_obj_label = _label("Cruzar o portão do castelo.", 11, Color(0.92, 0.92, 0.92))
+	mission_obj_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(mission_obj_label)
+
+
+func _build_suspicion_panel() -> void:
+	suspicion_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(186, 34))
+	suspicion_panel.position = Vector2(10, 300)
+	suspicion_panel.visible = false
+	ui.add_child(suspicion_panel)
+	var lbl := _label("OSRIC TE VÊ", 9, Color(1.0, 0.55, 0.25))
+	lbl.position = Vector2(8, 4)
+	suspicion_panel.add_child(lbl)
+	suspicion_bar = TextureProgressBar.new()
+	suspicion_bar.texture_progress = tex_stat_fill
+	suspicion_bar.texture_under = tex_stat_bg
+	suspicion_bar.tint_progress = Color(1.0, 0.35, 0.15)
+	suspicion_bar.min_value = 0
+	suspicion_bar.max_value = 100
+	suspicion_bar.value = 0
+	suspicion_bar.position = Vector2(8, 20)
+	suspicion_bar.custom_minimum_size = Vector2(170, 10)
+	suspicion_bar.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	suspicion_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	suspicion_panel.add_child(suspicion_bar)
+
+
+func _build_opportunity_panel() -> void:
+	opportunity_panel = _9patch(tex_tooltip, [4, 4, 4, 4], Vector2(360, 64))
+	opportunity_panel.position = Vector2(460, 188)
+	opportunity_panel.visible = false
+	opportunity_panel.modulate = Color(1.0, 0.9, 0.3)
+	ui.add_child(opportunity_panel)
+	opportunity_label = _label("PORTÃO ABERTO!", 16, Color(1.0, 0.85, 0.1))
+	opportunity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	opportunity_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	opportunity_label.offset_top = 8
+	opportunity_panel.add_child(opportunity_label)
+	opportunity_timer_label = _label("22s", 13, Color(1.0, 1.0, 0.8))
+	opportunity_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	opportunity_timer_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	opportunity_timer_label.offset_bottom = -8
+	opportunity_panel.add_child(opportunity_timer_label)
+
+
+func _build_clue_popup() -> void:
+	clue_popup = _9patch(tex_tooltip, [4, 4, 4, 4], Vector2(290, 80))
+	clue_popup.position = Vector2(1300, 108)
+	clue_popup.visible = false
+	ui.add_child(clue_popup)
+	var header := _label("PISTA ENCONTRADA", 9, Color(1.0, 0.82, 0.2))
+	header.position = Vector2(8, 5)
+	clue_popup.add_child(header)
+	clue_popup_label = _label("", 12, Color(1.0, 1.0, 0.85))
+	clue_popup_label.position = Vector2(8, 18)
+	clue_popup_label.custom_minimum_size = Vector2(274, 0)
+	clue_popup.add_child(clue_popup_label)
+	clue_popup_desc = _label("", 10, Color(0.8, 0.8, 0.75))
+	clue_popup_desc.position = Vector2(8, 36)
+	clue_popup_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	clue_popup_desc.custom_minimum_size = Vector2(274, 40)
+	clue_popup.add_child(clue_popup_desc)
+
+
+func _build_active_event_panel() -> void:
+	active_event_panel = _9patch(tex_panel, [6, 6, 6, 6], Vector2(320, 130))
+	active_event_panel.position = Vector2(480, 8)
+	active_event_panel.visible = false
+	ui.add_child(active_event_panel)
+	var bg := ColorRect.new()
+	bg.color = Color(0.08, 0.06, 0.14, 0.92)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	active_event_panel.add_child(bg)
+	active_event_panel.move_child(bg, 0)
+	var header := _label("EVENTO", 9, Color(1.0, 0.35, 0.25))
+	header.position = Vector2(10, 5)
+	active_event_panel.add_child(header)
+	ae_name_label = _label("", 12, Color(1.0, 0.92, 0.65))
+	ae_name_label.position = Vector2(10, 18)
+	ae_name_label.custom_minimum_size = Vector2(300, 0)
+	active_event_panel.add_child(ae_name_label)
+	var obj_header := _label("Objetivo:", 9, Color(0.7, 0.7, 0.65))
+	obj_header.position = Vector2(10, 36)
+	active_event_panel.add_child(obj_header)
+	ae_obj_label = _label("", 10, Color(1, 1, 0.9))
+	ae_obj_label.position = Vector2(70, 36)
+	ae_obj_label.custom_minimum_size = Vector2(240, 0)
+	ae_obj_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	active_event_panel.add_child(ae_obj_label)
+	ae_time_label = _label("Tempo: --s", 11, Color(1.0, 0.85, 0.4))
+	ae_time_label.position = Vector2(10, 56)
+	active_event_panel.add_child(ae_time_label)
+	var risk_header := _label("Risco:", 9, Color(0.7, 0.7, 0.65))
+	risk_header.position = Vector2(10, 74)
+	active_event_panel.add_child(risk_header)
+	ae_risk_bar = ColorRect.new()
+	ae_risk_bar.color = Color(0.15, 0.15, 0.2)
+	ae_risk_bar.position = Vector2(50, 75)
+	ae_risk_bar.size = Vector2(120, 10)
+	ae_risk_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	active_event_panel.add_child(ae_risk_bar)
+	ae_risk_fill = ColorRect.new()
+	ae_risk_fill.color = Color(0.9, 0.3, 0.2)
+	ae_risk_fill.position = Vector2(50, 75)
+	ae_risk_fill.size = Vector2(60, 10)
+	ae_risk_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	active_event_panel.add_child(ae_risk_fill)
+	ae_risk_label = _label("50%", 9, Color(1, 0.6, 0.5))
+	ae_risk_label.position = Vector2(176, 74)
+	active_event_panel.add_child(ae_risk_label)
+	ae_npcs_label = _label("", 9, Color(0.75, 0.82, 1.0))
+	ae_npcs_label.position = Vector2(10, 90)
+	ae_npcs_label.custom_minimum_size = Vector2(300, 0)
+	active_event_panel.add_child(ae_npcs_label)
+	ae_hint_label = _label("", 9, Color(0.5, 0.9, 0.5))
+	ae_hint_label.position = Vector2(10, 106)
+	ae_hint_label.custom_minimum_size = Vector2(300, 0)
+	active_event_panel.add_child(ae_hint_label)
+	ae_consequence_label = _label("", 9, Color(0.9, 0.5, 0.4))
+	ae_consequence_label.position = Vector2(10, 120)
+	ae_consequence_label.custom_minimum_size = Vector2(300, 0)
+	active_event_panel.add_child(ae_consequence_label)
+
+
+func show_active_event(ev: Dictionary) -> void:
+	ae_name_label.text = ev.name
+	ae_obj_label.text = ev.objective
+	ae_time_label.text = "Tempo: %ds" % int(ev.duration - ev.elapsed)
+	var risk_pct := clampf(ev.risk, 0.0, 100.0)
+	ae_risk_fill.size.x = 120.0 * risk_pct / 100.0
+	ae_risk_fill.color = Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.1, 0.05), risk_pct / 100.0)
+	ae_risk_label.text = "%d%%" % int(risk_pct)
+	var npc_names: Array = []
+	for nid in ev.npc_ids:
+		var def: Dictionary = Game.NPC_DEFS.get(nid, Game.VILLAGER_DEFS.get(nid, {}))
+		if def.has("name"):
+			npc_names.append(str(def.name))
+	ae_npcs_label.text = "Envolvidos: %s" % ", ".join(npc_names) if npc_names.size() > 0 else ""
+	ae_hint_label.text = ev.hint if ev.hint != "" else ""
+	ae_consequence_label.text = ev.consequences if ev.consequences != "" else ""
+	if not active_event_panel.visible:
+		active_event_panel.position.x = 1300
+		active_event_panel.visible = true
+		create_tween().tween_property(active_event_panel, "position:x", 480.0, 0.4).set_trans(Tween.TRANS_BACK)
+	else:
+		active_event_panel.visible = true
+
+
+func update_active_event_time(remaining: float, risk: float) -> void:
+	ae_time_label.text = "Tempo: %ds" % int(maxf(remaining, 0.0))
+	var risk_pct := clampf(risk, 0.0, 100.0)
+	ae_risk_fill.size.x = 120.0 * risk_pct / 100.0
+	ae_risk_fill.color = Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.1, 0.05), risk_pct / 100.0)
+	ae_risk_label.text = "%d%%" % int(risk_pct)
+	if remaining <= 5.0:
+		ae_time_label.add_theme_color_override("font_color", Color(1, 0.2, 0.15))
+	else:
+		ae_time_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+
+
+func hide_active_event() -> void:
+	active_event_panel.visible = false
+
+
+func _build_confrontation_panel() -> void:
+	confront_panel = _9patch(tex_panel, [6, 6, 6, 6], Vector2(340, 220))
+	confront_panel.position = Vector2(470, 250)
+	confront_panel.visible = false
+	confront_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui.add_child(confront_panel)
+	confront_title = _label("CONFRONTO", 13, Color(1.0, 0.35, 0.25))
+	confront_title.position = Vector2(12, 8)
+	confront_panel.add_child(confront_title)
+	confront_desc = _label("", 10, Color(0.85, 0.85, 0.8))
+	confront_desc.position = Vector2(12, 28)
+	confront_desc.custom_minimum_size = Vector2(316, 0)
+	confront_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	confront_panel.add_child(confront_desc)
+	for i in 6:
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(310, 24)
+		btn.position = Vector2(14, 50 + i * 26)
+		btn.add_theme_font_size_override("font_size", 11)
+		btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		btn.visible = false
+		var idx := i
+		btn.pressed.connect(func(): _on_confront_choice(idx))
+		confront_panel.add_child(btn)
+		confront_buttons.append(btn)
+	confront_result_label = _label("", 11, Color(1.0, 0.9, 0.5))
+	confront_result_label.position = Vector2(12, 50)
+	confront_result_label.custom_minimum_size = Vector2(316, 0)
+	confront_result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	confront_result_label.visible = false
+	confront_panel.add_child(confront_result_label)
+
+
+func show_confrontation(npc_name: String, npc_id: String, choices: Array, callback: Callable) -> void:
+	_confront_npc_id = npc_id
+	_confront_callback = callback
+	confront_title.text = "%s te alcançou!" % npc_name
+	confront_desc.text = "O que você faz?"
+	confront_result_label.visible = false
+	for i in confront_buttons.size():
+		if i < choices.size():
+			var c: Dictionary = choices[i]
+			var btn: Button = confront_buttons[i]
+			btn.text = "[%d] %s — %s" % [i + 1, c.label, c.description]
+			btn.visible = true
+			btn.disabled = not c.available
+			btn.set_meta("choice_id", c.id)
+			btn.modulate = Color.WHITE if c.available else Color(0.5, 0.5, 0.5)
+		else:
+			confront_buttons[i].visible = false
+	confront_panel.visible = true
+	confront_panel.scale = Vector2(0.8, 0.8)
+	confront_panel.pivot_offset = Vector2(170, 110)
+	create_tween().tween_property(confront_panel, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK)
+
+
+func _on_confront_choice(idx: int) -> void:
+	if idx >= confront_buttons.size() or not confront_buttons[idx].visible:
+		return
+	var btn: Button = confront_buttons[idx]
+	if btn.disabled:
+		return
+	var choice_id: String = btn.get_meta("choice_id", "")
+	if choice_id == "" or _confront_npc_id == "":
+		return
+	for b in confront_buttons:
+		b.visible = false
+	var result: Dictionary = Game.evaluate_confrontation(choice_id, _confront_npc_id)
+	confront_result_label.text = result.text
+	confront_result_label.visible = true
+	confront_result_label.add_theme_color_override("font_color",
+		Color(0.4, 1.0, 0.5) if result.success else Color(1.0, 0.4, 0.35))
+	confront_desc.text = ""
+	if _confront_callback.is_valid():
+		get_tree().create_timer(2.0).timeout.connect(func():
+			confront_panel.visible = false
+			_confront_callback.call(choice_id, result))
+
+
+func hide_confrontation() -> void:
+	confront_panel.visible = false
+
+
+func _build_action_menu() -> void:
+	action_panel = _9patch(tex_panel, [6, 6, 6, 6], Vector2(300, 360))
+	action_panel.position = Vector2(490, 180)
+	action_panel.visible = false
+	action_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui.add_child(action_panel)
+	action_title = _label("AÇÕES", 13, Color(1.0, 0.85, 0.35))
+	action_title.position = Vector2(12, 10)
+	action_title.custom_minimum_size = Vector2(276, 24)
+	action_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	action_panel.add_child(action_title)
+	for index in 8:
+		var btn := Button.new()
+		btn.position = Vector2(14 + (index % 2) * 140, 46 + (index / 2) * 70)
+		btn.size = Vector2(132, 58)
+		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		btn.visible = false
+		btn.pressed.connect(_choose_context_action.bind(btn))
+		action_panel.add_child(btn)
+		action_buttons.append(btn)
+
+
+func show_action_menu(target_label: String, actions: Array, callback: Callable) -> void:
+	_action_callback = callback
+	action_title.text = "AÇÕES — %s" % target_label.left(24)
+	for i in action_buttons.size():
+		var btn := action_buttons[i]
+		if i < actions.size():
+			var action: Dictionary = actions[i]
+			btn.text = "%s\nPA %d" % [str(action.get("name", "Ação")), int(action.get("cost", 0))]
+			btn.set_meta("action_id", str(action.get("id", "")))
+			btn.visible = true
+			btn.disabled = false
+		else:
+			btn.visible = false
+	action_panel.visible = true
+	action_panel.scale = Vector2(0.85, 0.85)
+	action_panel.pivot_offset = Vector2(150, 150)
+	create_tween().tween_property(action_panel, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK)
+
+
+func _choose_context_action(btn: Button) -> void:
+	var action_id := str(btn.get_meta("action_id", ""))
+	if action_id.is_empty() or not _action_callback.is_valid():
+		return
+	action_panel.visible = false
+	_action_callback.call(action_id)
+
+
+func hide_action_menu() -> void:
+	action_panel.visible = false
+
+
+# ---- fila de eventos -------------------------------------------------------
+func _build_event_log() -> void:
+	event_log_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(320, 140))
+	event_log_panel.position = Vector2(10, 720 - 400)
+	event_log_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(event_log_panel)
+	var title := _label("EVENTOS", 11, Color(1.0, 0.85, 0.35))
+	title.position = Vector2(10, 6)
+	event_log_panel.add_child(title)
+	var clip := Control.new()
+	clip.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
+	clip.position = Vector2(8, 22)
+	clip.size = Vector2(304, 112)
+	clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	event_log_panel.add_child(clip)
+	event_log_box = VBoxContainer.new()
+	event_log_box.add_theme_constant_override("separation", 2)
+	event_log_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clip.add_child(event_log_box)
+
+
+func add_event_log(text: String) -> void:
+	_event_log.append(text)
+	if _event_log.size() > 20:
+		_event_log = _event_log.slice(-20)
+	_refresh_event_log()
+
+
+func _refresh_event_log() -> void:
+	for c in event_log_box.get_children():
+		c.queue_free()
+	var visible_events := _event_log.slice(maxi(_event_log.size() - 6, 0))
+	for i in visible_events.size():
+		var idx := _event_log.size() - visible_events.size() + i + 1
+		var lbl := _label("[%d] %s" % [idx, visible_events[i]], 10, Color(0.75, 0.85, 0.8))
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lbl.custom_minimum_size.x = 300
+		event_log_box.add_child(lbl)
+
+
+# ---- cadeia causal ----------------------------------------------------------
+func _build_chain_panel() -> void:
+	chain_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(240, 180))
+	chain_panel.position = Vector2(1280 - 254, 200)
+	chain_panel.visible = false
+	chain_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(chain_panel)
+	var title := _label("CADEIA DE EVENTOS", 11, Color(1.0, 0.85, 0.35))
+	title.position = Vector2(10, 6)
+	chain_panel.add_child(title)
+	chain_vbox = VBoxContainer.new()
+	chain_vbox.position = Vector2(10, 24)
+	chain_vbox.add_theme_constant_override("separation", 3)
+	chain_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chain_panel.add_child(chain_vbox)
+
+
+func update_chain_panel(events: Array) -> void:
+	for c in chain_vbox.get_children():
+		c.queue_free()
+	if events.is_empty():
+		chain_panel.visible = false
+		return
+	chain_panel.visible = true
+	for ev in events:
+		var icon := "✓" if ev.get("done", false) else ("→" if ev.get("active", false) else "○")
+		var col := Color(0.4, 0.85, 0.4) if ev.get("done", false) else (Color(1.0, 0.85, 0.35) if ev.get("active", false) else Color(0.5, 0.6, 0.55))
+		var lbl := _label("%s %s" % [icon, str(ev.get("label", ""))], 11, col)
+		chain_vbox.add_child(lbl)
+	chain_panel.size.y = 24.0 + events.size() * 18.0
+
+
+# ---- API pública da missão -------------------------------------------------
+func show_mission_briefing() -> void:
+	mission_panel.visible = true
+	subtitle("Agência", "Cruzar o portão: faça Bram abandonar o posto.")
+	toast("Use objetos e boatos para criar uma distração!", 4.5)
+
+
+func set_mission_objective(text: String) -> void:
+	mission_obj_label.text = text
+	mission_panel.visible = true
+
+
+func set_suspicion(val: float) -> void:
+	suspicion_bar.value = val
+
+
+func set_suspicion_visible(v: bool) -> void:
+	suspicion_panel.visible = v
+
+
+func show_opportunity(seconds: float) -> void:
+	opportunity_timer_label.text = "%ds" % int(ceilf(seconds))
+	opportunity_panel.visible = true
+	if _opportunity_tween:
+		_opportunity_tween.kill()
+	_opportunity_tween = create_tween().set_loops()
+	_opportunity_tween.tween_property(opportunity_panel, "modulate", Color(1.5, 1.3, 0.4, 1.0), 0.4)
+	_opportunity_tween.tween_property(opportunity_panel, "modulate", Color(1.0, 0.9, 0.3, 1.0), 0.4)
+
+
+func update_opportunity(seconds: float) -> void:
+	opportunity_timer_label.text = "%ds" % maxi(0, int(ceilf(seconds)))
+
+
+func hide_opportunity() -> void:
+	if _opportunity_tween:
+		_opportunity_tween.kill()
+		_opportunity_tween = null
+	opportunity_panel.visible = false
+
+
+func show_clue_popup(lbl_text: String, desc_text: String) -> void:
+	clue_popup_label.text = lbl_text
+	clue_popup_desc.text = desc_text
+	clue_popup.visible = true
+	if clue_popup_tween:
+		clue_popup_tween.kill()
+	clue_popup_tween = create_tween()
+	# slide in
+	clue_popup_tween.tween_property(clue_popup, "position:x", 970.0, 0.35).set_trans(Tween.TRANS_BACK)
+	# wait, then slide out
+	clue_popup_tween.tween_interval(3.5)
+	clue_popup_tween.tween_property(clue_popup, "position:x", 1300.0, 0.3).set_trans(Tween.TRANS_QUAD)
+	clue_popup_tween.tween_callback(func(): clue_popup.visible = false)
+
+
+func flash_danger() -> void:
+	if alarm_rect:
+		alarm_rect.color = Color(1, 0, 0, 0.38)
+		var tw := create_tween()
+		tw.tween_property(alarm_rect, "color:a", 0.0, 0.6)
+
+
+# ================================================================ TOP_LEFT
 func _build_top_left() -> void:
 	var panel := _9patch(tex_day_banner, [6, 4, 6, 4], Vector2(220, 80))
 	panel.position = Vector2(10, 8)
@@ -338,6 +846,34 @@ func _build_card() -> void:
 		row.add_child(val_l)
 		card_vbox.add_child(row)
 		stat_rows.append({"bar": bar_holder, "val": val_l})
+	# suspicion row
+	var susp_row := HBoxContainer.new()
+	susp_row.add_theme_constant_override("separation", 6)
+	susp_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var susp_icon := TextureRect.new()
+	var susp_atlas := AtlasTexture.new()
+	susp_atlas.atlas = tex_stat_icons
+	susp_atlas.region = Rect2(0, 0, 10, 10)
+	susp_icon.texture = susp_atlas
+	susp_icon.custom_minimum_size = Vector2(20, 20)
+	susp_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	susp_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	susp_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	susp_icon.modulate = Color(1.0, 0.5, 0.2)
+	susp_row.add_child(susp_icon)
+	var susp_name := _label("Suspeita", 12, Color(1.0, 0.5, 0.2))
+	susp_name.custom_minimum_size.x = 62
+	susp_row.add_child(susp_name)
+	card_susp_bar = StatBar.new()
+	card_susp_bar.stat_index = -1
+	card_susp_bar.tex_fill = tex_stat_fill
+	card_susp_bar.tex_bg = tex_stat_bg
+	susp_row.add_child(card_susp_bar)
+	card_susp_val = _label("0", 12, Color(1.0, 0.5, 0.2))
+	card_susp_val.custom_minimum_size.x = 28
+	card_susp_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	susp_row.add_child(card_susp_val)
+	card_vbox.add_child(susp_row)
 	# separator 2
 	var sep2 := TextureRect.new()
 	sep2.texture = tex_separator
@@ -604,6 +1140,35 @@ func _refresh_status() -> void:
 			sb.custom_minimum_size = Vector2(80, 16)
 			row.add_child(sb)
 		status_vbox.add_child(row)
+	# reputação
+	var sep2 := TextureRect.new()
+	sep2.texture = tex_separator
+	sep2.custom_minimum_size = Vector2(560, 6)
+	sep2.stretch_mode = TextureRect.STRETCH_TILE
+	sep2.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	sep2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status_vbox.add_child(sep2)
+	status_vbox.add_child(_label("REPUTAÇÃO", 16, Color(1.0, 0.85, 0.35)))
+	for gid in Game.REPUTATION_GROUPS:
+		var gdef: Dictionary = Game.REPUTATION_GROUPS[gid]
+		var rep_val: float = Game.get_reputation(gid)
+		var rep_row := HBoxContainer.new()
+		rep_row.add_theme_constant_override("separation", 8)
+		rep_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var gname := _label(str(gdef.name), 13, Color(0.9, 0.95, 1.0))
+		gname.custom_minimum_size.x = 140
+		rep_row.add_child(gname)
+		var rep_col := Color(0.4, 0.85, 0.4) if rep_val > 10.0 else (Color(1.0, 0.4, 0.3) if rep_val < -10.0 else Color(0.7, 0.7, 0.7))
+		var rep_text := "%+d" % int(rep_val)
+		var rep_lbl := _label(rep_text, 14, rep_col)
+		rep_lbl.custom_minimum_size.x = 50
+		rep_row.add_child(rep_lbl)
+		var rep_bar := StatusStatBar.new()
+		rep_bar.stat_color = rep_col
+		rep_bar.value = (rep_val + 100.0) / 2.0
+		rep_bar.custom_minimum_size = Vector2(120, 14)
+		rep_row.add_child(rep_bar)
+		status_vbox.add_child(rep_row)
 
 
 func _build_pause() -> void:
@@ -656,7 +1221,7 @@ func _build_pause() -> void:
 
 
 func toggle_pause() -> void:
-	if world.phase == 3:
+	if world.phase == world.Phase.ACTIVE_EVENT:
 		return
 	var p := not get_tree().paused
 	get_tree().paused = p
@@ -773,6 +1338,12 @@ func set_sim(on: bool) -> void:
 		lbl_day.text = "DIA %d/%d — SIMULAÇÃO" % [Game.day, Game.MAX_DAYS]
 
 
+func set_active_event_mode(on: bool) -> void:
+	end_btn.visible = not on
+	if on:
+		lbl_day.text = "DIA %d/%d — EVENTO ATIVO" % [Game.day, Game.MAX_DAYS]
+
+
 func set_ui_visible(v: bool) -> void:
 	for c in ui.get_children():
 		if c != flash_rect and c != alarm_rect and c != banner:
@@ -820,6 +1391,9 @@ func set_hover(o, n) -> void:
 		for i in 4:
 			stat_rows[i].bar.target = float(stats_arr[i])
 			stat_rows[i].val.text = str(int(round(float(stats_arr[i]))))
+		var susp_val: float = float(st.get("suspicion", show_n.suspicion if show_n is NPC else 0.0))
+		card_susp_bar.target = susp_val
+		card_susp_val.text = str(int(round(susp_val)))
 		# memories
 		for c in memory_box.get_children():
 			c.queue_free()
@@ -862,8 +1436,8 @@ func _process(delta: float) -> void:
 		alarm_rect.color.a = 0.25 * (0.5 + 0.5 * sin(alarm_t * 12.0))
 	else:
 		alarm_rect.color.a = 0.0
-	if world.phase != 3:
-		if not world.sim_running and world.phase == 0:
+	if world.phase != world.Phase.ACTIVE_EVENT:
+		if not world.sim_running and world.phase == world.Phase.ACTION:
 			lbl_day.text = "DIA %d/%d — %s" % [Game.day, Game.MAX_DAYS, "MANHÃ"]
 		elif world.sim_running:
 			var c: float = world.clock
@@ -876,6 +1450,8 @@ func _input(event: InputEvent) -> void:
 			if terminal.visible:
 				close_terminal()
 				world.terminal_cancel()
+			elif action_panel and action_panel.visible:
+				hide_action_menu()
 			elif tutorial_panel and is_instance_valid(tutorial_panel) and not tutorial_panel.is_queued_for_deletion():
 				pass
 			else:
@@ -910,7 +1486,7 @@ class StatBar extends Control:
 			var fh := float(tex_fill.get_height())
 			var frame_w := float(tex_fill.get_width()) / 4.0
 			var src_w := frame_w * clampf(shown / 100.0, 0.0, 1.0)
-			var src_x := float(stat_index) * frame_w
+			var src_x := float(maxi(stat_index, 0)) * frame_w
 			draw_texture_rect_region(tex_fill, Rect2(0, 0, fill_w, size.y), Rect2(src_x, 0, src_w, fh))
 
 

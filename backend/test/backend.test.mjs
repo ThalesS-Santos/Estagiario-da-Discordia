@@ -33,6 +33,16 @@ test("sanitizeEffect é tolerante: ajusta valores e remove só o item ruim", () 
   assert.equal(eff.npc_updates[1].target_node_to_move, "");
 });
 
+test("sanitizeEffect limita eventos ativos a NPCs e locais conhecidos", () => {
+  const eff = sanitizeEffect({ ...oneUpdate, active_events: [{
+    name: "Investigação", objective: "Proteja a carta", duration: 20, risk: 55,
+    npc_ids: ["npc_guard", "fantasma", "npc_guard"], location: "../../etc",
+  }] }, new Set(["npc_baker", "npc_guard"]));
+  assert.equal(eff.active_events.length, 1);
+  assert.deepEqual(eff.active_events[0].npc_ids, ["npc_guard"]);
+  assert.equal(eff.active_events[0].location, "");
+});
+
 test("parseModelJson aceita cerca de markdown", () => {
   assert.deepEqual(parseModelJson("```json\n{\"a\":1}\n```"), { a: 1 });
 });
@@ -88,4 +98,42 @@ test("recusa chave do Vertex (AQ.) com erro claro em vez de chamar o Google", as
   assert.equal(res.status, 503);
   assert.equal((await res.json()).error, "wrong_key_type");
   assert.equal(called, false);
+});
+
+test("sanitizeEffect aceita suspicion_delta por NPC", () => {
+  const data = { instability_delta: 5, npc_updates: [
+    { npc_id: "npc_guard", dialogue_bubble: "Hm.", new_state: "TALK", target_node_to_move: "", fear_level: 10, anger_level: 10, loyalty_level: 90, suspicion_delta: 15 },
+  ] };
+  const r = sanitizeEffect(data, new Set(["npc_guard"]));
+  assert.equal(r.npc_updates[0].suspicion_delta, 15);
+});
+
+test("sanitizeEffect clampeia suspicion_delta fora de [-30,30]", () => {
+  const data = { instability_delta: 5, npc_updates: [
+    { npc_id: "npc_guard", dialogue_bubble: "X", new_state: "IDLE", target_node_to_move: "", fear_level: 0, anger_level: 0, loyalty_level: 50, suspicion_delta: 99 },
+  ] };
+  const r = sanitizeEffect(data, new Set(["npc_guard"]));
+  assert.equal(r.npc_updates[0].suspicion_delta, 30);
+});
+
+test("sanitizeEffect valida evidence_created", () => {
+  const data = { instability_delta: 3, npc_updates: [
+    { npc_id: "npc_baker", dialogue_bubble: "Vi!", new_state: "TALK", target_node_to_move: "", fear_level: 50, anger_level: 20, loyalty_level: 40 },
+  ], evidence_created: [
+    { type: "testimony", strength: 25, description: "Padeiro viu algo", location: "plaza" },
+    { type: "invalid_type", strength: 10, description: "x", location: "plaza" },
+  ] };
+  const r = sanitizeEffect(data, new Set(["npc_baker"]));
+  assert.equal(r.evidence_created.length, 1);
+  assert.equal(r.evidence_created[0].type, "testimony");
+  assert.equal(r.evidence_created[0].strength, 25);
+});
+
+test("sanitizeRequest passa campos de contexto enriquecido", () => {
+  const rich = { ...body, context: { ...body.context, evidence: [{ id: "ev_1" }], player_stealth: true, held_object: "veneno" } };
+  const r = sanitizeRequest(rich);
+  assert.ok(r.ok);
+  assert.deepEqual(r.value.context.evidence, [{ id: "ev_1" }]);
+  assert.equal(r.value.context.player_stealth, true);
+  assert.equal(r.value.context.held_object, "veneno");
 });

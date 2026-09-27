@@ -41,9 +41,12 @@ func _ready() -> void:
 	check(not d.last_url.contains("key") and not JSON.stringify(d.last_body).contains("api"), "no key travels from the client")
 	check(d.last_body.context.day == 2 and d.last_body.gossip.contains("envenenou"), "context and gossip are sent")
 	var reply := {"schema_version": 1, "instability_delta": 12, "npc_updates": [{"npc_id": "npc_baker", "dialogue_bubble": "Não bebam!",
-		"new_state": "AFRAID", "target_node_to_move": "well", "fear_level": 60, "anger_level": 30, "loyalty_level": 30}]}
+		"new_state": "AFRAID", "target_node_to_move": "well", "fear_level": 60, "anger_level": 30, "loyalty_level": 30}],
+		"active_events": [{"name": "Investigação", "objective": "Proteja a fonte", "duration": 20, "risk": 55,
+			"npc_ids": ["npc_baker", "fantasma"], "location": "well", "hint": "Desvie o guarda"}]}
 	d._on_request_completed(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(), JSON.stringify(reply).to_utf8_buffer())
 	check(results.size() == 1 and results[0].instability_delta == 12 and not d.is_processing, "backend reply accepted")
+	check(results[0].get("active_events", []).size() == 1 and results[0].active_events[0].npc_ids == ["npc_baker"], "active event preserves only known NPCs")
 
 	# transporte: 1 nova tentativa automática, depois erro
 	d.evaluate_butterfly_effect("a", "b", states)

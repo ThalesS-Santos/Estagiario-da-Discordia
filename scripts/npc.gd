@@ -4,6 +4,14 @@ extends CharacterBody2D
 
 signal arrived
 
+enum SuspicionState { CALM, ALERT, INVESTIGATING, SEARCHING, CONFRONTING }
+
+const SUSPICION_CALM       := 0.0
+const SUSPICION_ALERT      := 25.0
+const SUSPICION_INVESTIGATE := 50.0
+const SUSPICION_SEARCH     := 75.0
+const SUSPICION_CONFRONT   := 100.0
+
 @export var speed := 120.0
 @export var fear := 0
 @export var anger := 0
@@ -43,6 +51,20 @@ var wander_t := 2.0
 var patrol: Array = []
 var patrol_i := 0
 var dust_t := 0.0
+var pursue_speed_mult := 1.0
+
+var suspicion := 0.0
+var suspicion_state: int = SuspicionState.CALM
+var _suspicion_decay_paused := false
+
+var pursuing := false
+var pursue_target: Node2D = null
+var pursue_timer := 0.0
+var pursue_duration := 12.0
+var pursue_lost_timer := 0.0
+var _pursue_repath_t := 0.0
+var _pursue_call_t := 0.0
+var _pursue_shout_t := 0.0
 
 var body: Sprite2D
 var shadow: Sprite2D
@@ -150,6 +172,7 @@ func say(text: String, dur := 3.5) -> void:
 	bubble = text
 	bubble_t = dur
 	bubble_label.text = text.left(AIContract.MAX_DIALOGUE)
+	bubble_label.position = Vector2(-100 + randf_range(-30, 30), -118 + randf_range(-20, 10))
 	bubble_label.visible = true
 	bubble_label.pivot_offset = Vector2(100, 64)
 	bubble_label.scale = Vector2.ZERO
@@ -196,6 +219,127 @@ func _pick_wander() -> Vector2:
 	return home + Vector2(randf_range(-28, 28), randf_range(-14, 14))
 
 
+func add_suspicion(amount: float) -> void:
+	var prev_state := suspicion_state
+	suspicion = clampf(suspicion + amount, 0.0, 100.0)
+	_update_suspicion_state()
+	if suspicion_state != prev_state:
+		_on_suspicion_state_changed(prev_state, suspicion_state)
+
+
+func reduce_suspicion(amount: float) -> void:
+	suspicion = clampf(suspicion - amount, 0.0, 100.0)
+	_update_suspicion_state()
+
+
+func _update_suspicion_state() -> void:
+	if suspicion >= SUSPICION_CONFRONT:
+		suspicion_state = SuspicionState.CONFRONTING
+	elif suspicion >= SUSPICION_SEARCH:
+		suspicion_state = SuspicionState.SEARCHING
+	elif suspicion >= SUSPICION_INVESTIGATE:
+		suspicion_state = SuspicionState.INVESTIGATING
+	elif suspicion >= SUSPICION_ALERT:
+		suspicion_state = SuspicionState.ALERT
+	else:
+		suspicion_state = SuspicionState.CALM
+
+
+func _on_suspicion_state_changed(_from: int, to: int) -> void:
+	match to:
+		SuspicionState.ALERT:
+			show_emote("?", 2.0)
+		SuspicionState.INVESTIGATING:
+			show_emote("!", 2.0)
+			say("Hmm... estranho.", 3.0)
+		SuspicionState.SEARCHING:
+			show_emote("!", 2.5)
+			say("Quem foi?!", 3.5)
+		SuspicionState.CONFRONTING:
+			show_emote("!", 3.0)
+			say("Estagiário! O que você está fazendo?!", 4.5)
+		_:
+			pass
+
+
+# ---- perseguição ----
+func start_pursuit(target_node: Node2D, duration := 12.0) -> void:
+	if fallen or pursuing:
+		return
+	pursuing = true
+	pursue_target = target_node
+	pursue_timer = 0.0
+	pursue_duration = duration
+	pursue_lost_timer = 0.0
+	_pursue_repath_t = 0.0
+	_pursue_call_t = 0.0
+	_pursue_shout_t = 0.0
+	running = true
+	current_state = "RUN"
+	show_emote("!", 2.0)
+	say("Pare aí!", 3.0)
+
+
+func stop_pursuit(reason := "") -> void:
+	if not pursuing:
+		return
+	pursuing = false
+	pursue_target = null
+	running = false
+	moving = false
+	current_state = "IDLE"
+	suspicion = clampf(suspicion, 0.0, 70.0)
+	_suspicion_decay_paused = false
+	if reason == "lost":
+		show_emote("?", 2.5)
+		say("Para onde ele foi?!", 3.0)
+	elif reason == "timeout":
+		show_emote("...", 2.0)
+		say("Bah, não vale a pena.", 3.0)
+	elif reason == "distracted":
+		show_emote("!", 2.0)
+
+
+func _tick_pursuit(delta: float) -> void:
+	if not pursuing or not is_instance_valid(pursue_target):
+		stop_pursuit("lost")
+		return
+	pursue_timer += delta
+	if pursue_timer >= pursue_duration:
+		stop_pursuit("timeout")
+		return
+	var dist := global_position.distance_to(pursue_target.global_position)
+	# perdeu de vista
+	if dist > 180.0:
+		pursue_lost_timer += delta
+		if pursue_lost_timer > 2.5:
+			stop_pursuit("lost")
+			return
+	else:
+		pursue_lost_timer = 0.0
+	# recalcular caminho periodicamente
+	_pursue_repath_t -= delta
+	if _pursue_repath_t <= 0.0:
+		_pursue_repath_t = 0.3
+		walk_to(pursue_target.global_position, true)
+	# gritar periodicamente
+	_pursue_shout_t -= delta
+	if _pursue_shout_t <= 0.0:
+		_pursue_shout_t = 4.0
+		var shouts := ["Volte aqui!", "Não vai escapar!", "Peguem ele!", "Eu vi o que você fez!"]
+		say(shouts[randi() % shouts.size()], 2.5)
+	# chamar reforço
+	_pursue_call_t -= delta
+	if _pursue_call_t <= 0.0 and dist < 120.0:
+		_pursue_call_t = 6.0
+		if world and world.has_method("_on_npc_calls_backup"):
+			world._on_npc_calls_backup(self)
+	# captura
+	if dist < 24.0:
+		if world and world.has_method("_on_npc_catches_player"):
+			world._on_npc_catches_player(self)
+
+
 func _process(delta: float) -> void:
 	if world != null and (world.phase == 1 or world.get("ai_waiting") == true):
 		return
@@ -204,6 +348,10 @@ func _process(delta: float) -> void:
 	emote_t = maxf(emote_t - delta, 0.0)
 	mood_anger = maxf(mood_anger - delta * 0.05, 0.0)
 	mood_fear = maxf(mood_fear - delta * 0.05, 0.0)
+	if not _suspicion_decay_paused and suspicion > 0.0:
+		var decay := 3.0 if suspicion_state == SuspicionState.CALM else 1.5
+		var decay_mult: float = Game.get_difficulty().suspicion_decay
+		reduce_suspicion(delta * decay * decay_mult)
 	bubble_label.visible = bubble_t > 0.0
 	_update_sprite(motion)
 	ui.queue_redraw()
@@ -219,6 +367,8 @@ func _physics_process(delta: float) -> void:
 		return
 	if NavigationServer2D.map_get_iteration_id(navigation_agent.get_navigation_map()) == 0:
 		return
+	if pursuing:
+		_tick_pursuit(delta)
 	if moving and not fallen:
 		if navigation_agent.is_navigation_finished():
 			moving = false
@@ -227,7 +377,8 @@ func _physics_process(delta: float) -> void:
 		else:
 			var next := navigation_agent.get_next_path_position()
 			motion = global_position.direction_to(next)
-			velocity = motion * minf(speed * (1.6 if running else 1.0) * sp, global_position.distance_to(next) / maxf(delta, 0.001))
+			var run_mult := (1.6 * pursue_speed_mult) if pursuing else (1.6 if running else 1.0)
+		velocity = motion * minf(speed * run_mult * sp, global_position.distance_to(next) / maxf(delta, 0.001))
 			var before := global_position
 			move_and_slide()
 			stuck_time = stuck_time + delta if global_position.distance_to(before) < 0.05 else 0.0
@@ -238,7 +389,7 @@ func _physics_process(delta: float) -> void:
 			if dust_t <= 0.0:
 				dust_t = 0.18
 				world.emit_particle("dust_small", global_position + Vector2(0, 2))
-	elif ambient and not fallen and id != "npc_king":
+	elif ambient and not fallen and not pursuing and id != "npc_king":
 		wander_t -= delta
 		if wander_t <= 0.0:
 			wander_t = randf_range(3.0, 7.0)
@@ -317,6 +468,21 @@ func draw_ui(c: CanvasItem) -> void:
 		c.draw_rect(Rect2(-tw / 2.0 - 5, 4, tw + 10, 16), Color(0.04, 0.05, 0.08, 0.88))
 		c.draw_rect(Rect2(-tw / 2.0 - 5, 4, tw + 10, 16), Color(1.0, 0.85, 0.35, 0.6), false, 1.0)
 		c.draw_string(font, Vector2(-tw / 2.0, 16), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 1))
+	if suspicion >= SUSPICION_ALERT:
+		var bar_w := 28.0
+		var bar_h := 4.0
+		var bar_x := -bar_w / 2.0
+		var bar_y := 22.0
+		var fill := suspicion / 100.0 * bar_w
+		var col: Color
+		match suspicion_state:
+			SuspicionState.ALERT:      col = Color(1.0, 0.85, 0.3)
+			SuspicionState.INVESTIGATING: col = Color(1.0, 0.6, 0.1)
+			SuspicionState.SEARCHING:  col = Color(1.0, 0.3, 0.1)
+			_:                         col = Color(1.0, 0.1, 0.1)
+		c.draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), Color(0.04, 0.05, 0.08, 0.85))
+		c.draw_rect(Rect2(bar_x, bar_y, fill, bar_h), col)
+		c.draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), col.darkened(0.4), false, 1.0)
 	if emote_t > 0.0 and emote != "":
 		var bob := sin(t * 6.0) * 2.0
 		var r := Rect2(-14, -h - 34 + bob, 28, 28)

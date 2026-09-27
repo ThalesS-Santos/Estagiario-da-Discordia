@@ -27,8 +27,10 @@ Você atua como o motor lógico do Efeito Borboleta de um jogo medieval stealth.
 O jogador sabotou um objeto e espalhou um boato. Analise o estado psicológico
 dos NPCs fornecido e calcule uma reação em cadeia caótica, mas causalmente
 coerente com as evidências, personalidades, medo, raiva e lealdade atuais.
-Responda ESTRITAMENTE com um objeto JSON, sem markdown ou texto adicional:
-{"instability_delta":0,"npc_updates":[]}.
+Responda ESTRITAMENTE com um objeto JSON, sem markdown ou texto adicional.
+Você pode incluir active_events somente quando a reação criar uma situação imediata
+para o jogador resolver. Cada evento contém name, objective, duration (5-60),
+risk (0-100), npc_ids, hint, consequences e location.
 instability_delta deve ser inteiro entre -20 e +45. npc_updates é uma matriz
 com no máximo 12 objetos, sem NPCs duplicados. Cada objeto contém:
 npc_id (ID fornecido), dialogue_bubble (string de até 240 caracteres),
@@ -233,11 +235,75 @@ func _validate_effect(data: Variant) -> Dictionary:
 			if not _integer_in(entry.get(key), 0, 100):
 				return {}
 		seen[entry.npc_id] = true
-		clean.append({"npc_id": entry.npc_id, "dialogue_bubble": entry.dialogue_bubble,
+		var upd := {"npc_id": entry.npc_id, "dialogue_bubble": entry.dialogue_bubble,
 			"new_state": entry.new_state, "target_node_to_move": entry.target_node_to_move,
 			"fear_level": int(entry.fear_level), "anger_level": int(entry.anger_level),
-			"loyalty_level": int(entry.loyalty_level)})
-	return {"instability_delta": int(data.instability_delta), "npc_updates": clean}
+			"loyalty_level": int(entry.loyalty_level)}
+		if _integer_in(entry.get("suspicion_delta"), -30, 30):
+			upd["suspicion_delta"] = int(entry.suspicion_delta)
+		clean.append(upd)
+	var result := {"instability_delta": int(data.instability_delta), "npc_updates": clean}
+	var active_events: Variant = data.get("active_events", [])
+	if typeof(active_events) == TYPE_ARRAY:
+		var clean_events: Array[Dictionary] = []
+		for raw_event: Variant in active_events:
+			if clean_events.size() >= 2 or typeof(raw_event) != TYPE_DICTIONARY:
+				continue
+			var location: String = str(raw_event.get("location", ""))
+			if typeof(location) != TYPE_STRING or (location != "" and not _location_ids.has(location)):
+				continue
+			var raw_name: Variant = raw_event.get("name", "")
+			var raw_objective: Variant = raw_event.get("objective", "")
+			if typeof(raw_name) != TYPE_STRING or typeof(raw_objective) != TYPE_STRING:
+				continue
+			var name := str(raw_name).strip_edges().left(80)
+			var objective := str(raw_objective).strip_edges().left(120)
+			if name.is_empty() or objective.is_empty():
+				continue
+			var npc_ids: Array[String] = []
+			var raw_ids: Variant = raw_event.get("npc_ids", [])
+			if typeof(raw_ids) == TYPE_ARRAY:
+				for npc_id: Variant in raw_ids:
+					if typeof(npc_id) == TYPE_STRING and _npc_ids.has(npc_id) and not npc_ids.has(npc_id):
+						npc_ids.append(npc_id)
+			var duration: Variant = raw_event.get("duration", 20)
+			var risk: Variant = raw_event.get("risk", 50)
+			if not _integer_in(duration, 5, 60) or not _integer_in(risk, 0, 100):
+				continue
+			clean_events.append({
+				"name": name, "objective": objective, "duration": float(duration), "risk": float(risk),
+				"npc_ids": npc_ids,
+				"hint": str(raw_event.get("hint", "")).strip_edges().left(120),
+				"consequences": str(raw_event.get("consequences", "")).strip_edges().left(120),
+				"location": location,
+			})
+		if not clean_events.is_empty():
+			result["active_events"] = clean_events
+	var evidence_types := ["weapon_found", "object_placed", "testimony", "overheard", "break_in", "forged_letter", "witness"]
+	var raw_evidence: Variant = data.get("evidence_created", [])
+	if typeof(raw_evidence) == TYPE_ARRAY:
+		var clean_evidence: Array[Dictionary] = []
+		for ev: Variant in raw_evidence:
+			if clean_evidence.size() >= 3 or typeof(ev) != TYPE_DICTIONARY:
+				continue
+			var etype: String = str(ev.get("type", ""))
+			if not evidence_types.has(etype):
+				continue
+			var strength: Variant = ev.get("strength", 10)
+			if not _integer_in(strength, 1, 50):
+				strength = 10
+			var loc: String = str(ev.get("location", ""))
+			if loc != "" and not _location_ids.has(loc):
+				loc = ""
+			clean_evidence.append({
+				"type": etype,
+				"strength": int(strength),
+				"description": str(ev.get("description", "")).strip_edges().left(160),
+				"location": loc,
+			})
+		if not clean_evidence.is_empty():
+			result["evidence_created"] = clean_evidence
+	return result
 
 
 func _integer_in(value: Variant, minimum: int, maximum: int) -> bool:

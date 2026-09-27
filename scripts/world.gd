@@ -5,7 +5,7 @@ signal victory
 signal defeat
 signal quit_to_menu
 
-enum Phase { ACTION, TERMINAL, SIM, ENDED }
+enum Phase { ACTION, TERMINAL, SIM, ACTIVE_EVENT, PURSUIT, CONFRONTATION, ENDED }
 
 const HudScript := preload("res://scripts/hud.gd")
 const GeminiScript := preload("res://scripts/gemini_director.gd")
@@ -59,11 +59,15 @@ var day_revision := 0
 var sim_running := false
 var snapshot := {}
 var rings: Array = []
+var _active_event_current: Dictionary = {}
+var _active_event_queue: Array = []
+var _phase_before_confrontation: int = Phase.ACTION
 var village: Village
 var villagers: Array = []
 var overlay: Overlay
 var player: PlayerIntern
 var gossip_npc: NPC = null
+var mission: MissionPortao = null
 const PlayerScene := preload("res://scenes/player_intern.tscn")
 
 
@@ -136,6 +140,7 @@ func _ready() -> void:
 	add_child(hud)
 	hud.gossip_submitted.connect(_on_gossip_submitted)
 	_build_player()
+	_build_mission()
 	_restore_checkpoint(Game.world_checkpoint)
 	_start_day()
 	if tutorial:
@@ -180,6 +185,9 @@ func _live_npc_states() -> Dictionary:
 			"fear": npc.fear, "anger": npc.anger, "loyalty": npc.loyalty,
 			"credulity": saved.get("cred", npc.def.get("cred", 50)),
 			"current_state": npc.current_state,
+			"suspicion": int(npc.suspicion),
+			"suspicion_state": NPC.SuspicionState.keys()[npc.suspicion_state],
+			"pursuing": npc.pursuing,
 			"position": {"x": npc.global_position.x, "y": npc.global_position.y},
 			"memories": saved.get("memories", []).duplicate()}
 	return states
@@ -209,8 +217,42 @@ func _request_caos(narrative: String) -> void:
 	hud.close_terminal()
 	hud.set_sim(true)
 	hud.set_loading(true) # Must precede evaluate: local validation can fail synchronously.
-	gemini_director.evaluate_butterfly_effect(action, narrative, states,
-		{"day": Game.day, "instability": Game.instability, "rumors": Game.rumors})
+	var context := {
+		"day": Game.day, "max_days": Game.MAX_DAYS,
+		"instability": Game.instability, "rumors": Game.rumors,
+		"ap_remaining": Game.ap,
+		"player_position": {"x": int(player.global_position.x), "y": int(player.global_position.y)},
+		"player_stealth": player.get("state") == PlayerIntern.State.STEALTH,
+		"held_object": held.def.name if held else "",
+		"reputation": Game.reputation.duplicate(),
+	}
+	var active_evidence := Game.evidence_summary()
+	if not active_evidence.is_empty():
+		context["evidence"] = active_evidence
+	var active_events := Game.events_summary_for_ai()
+	if not active_events.is_empty():
+		context["chain_events"] = active_events
+	var pending_aev := Game.get_pending_active_events()
+	if not pending_aev.is_empty():
+		var aev_summary: Array = []
+		for ev in pending_aev:
+			aev_summary.append({"name": ev.name, "objective": ev.objective, "npc_ids": ev.npc_ids})
+		context["active_events_in_progress"] = aev_summary
+	if mission and not mission.mission_ended:
+		context["mission"] = {
+			"phase": MissionPortao.MPhase.keys()[mission.phase],
+			"clues_found": mission.clues_found,
+			"gate_open": mission.gate_is_open,
+			"catch_count": mission.catch_count,
+		}
+	context["constraints"] = {
+		"king_deposed_is_code_only": true,
+		"instability_100_triggers_victory": true,
+		"max_instability_delta": 45,
+		"never_set_instability_directly": true,
+		"progression_events_are_code_driven": ["gate_passage", "king_deposed"],
+	}
+	gemini_director.evaluate_butterfly_effect(action, narrative, states, context)
 
 
 func _on_caos_gerado(data: Dictionary) -> void:
@@ -240,14 +282,33 @@ func _on_caos_gerado(data: Dictionary) -> void:
 		if npc == null:
 			continue
 		npc.apply_ai_directive(directive)
+		var npc_name: String = str(npc.def.get("name", npc.id))
 		var dialogue: String = directive.dialogue_bubble
 		if dialogue != "":
 			Game.add_memory(npc.id, dialogue)
-			hud.subtitle(str(npc.def.get("name", npc.id)), dialogue)
+			hud.subtitle(npc_name, dialogue)
+			hud.add_event_log("%s: \"%s\"" % [npc_name, dialogue.substr(0, 60)])
 	Game.apply_npc_updates(data.npc_updates)
+	for directive: Dictionary in data.npc_updates:
+		if directive.has("suspicion_delta") and directive.suspicion_delta != 0:
+			var npc: NPC = actors.get(directive.npc_id)
+			if npc:
+				npc.add_suspicion(int(directive.suspicion_delta))
+				if int(directive.suspicion_delta) > 0:
+					hud.add_event_log("A suspeita de %s aumentou." % str(npc.def.get("name", npc.id)))
+	if data.has("evidence_created") and typeof(data.evidence_created) == TYPE_ARRAY:
+		for ev: Dictionary in data.evidence_created:
+			Game.create_evidence(
+				str(ev.get("type", "")),
+				str(ev.get("location", "")),
+				str(ev.get("description", "")),
+				float(ev.get("strength", 20)) * Game.get_difficulty().evidence_weight,
+				"", "", "", false)
 	# This signal drives the existing HUD tween. Never add the delta again on end-day.
 	Game.add_instability(float(data.instability_delta))
 	hud.toast("Instabilidade %+d%%" % int(data.instability_delta), 2.5)
+	_parse_ai_active_events(data)
+	_evaluate_chain_events()
 	sim_events.clear()
 	sim_idx = 0
 	sim_time = 0.0
@@ -316,6 +377,39 @@ func _build_player() -> void:
 	cam2.make_current()
 
 
+func _build_mission() -> void:
+	mission = MissionPortao.new()
+	mission.name = "MissionPortao"
+	add_child(mission)
+	mission.setup(self, hud)
+	mission.mission_success.connect(_on_mission_success)
+	mission.mission_fail.connect(_on_mission_fail)
+
+
+func _on_mission_success() -> void:
+	Game.event_flags["player_crossed_gate"] = true
+	# A travessia é a única resolução válida para a janela do portão.
+	if not _active_event_current.is_empty() and _active_event_current.get("location", "") == "castle_gate":
+		resolve_current_event(true)
+	_evaluate_chain_events()
+	phase = Phase.ENDED
+	if is_instance_valid(player):
+		player.input_enabled = false
+	hud.flash()
+	hud.toast("Você cruzou o portão! Missão cumprida!", 5.0)
+	await get_tree().create_timer(2.0).timeout
+	victory.emit()
+
+
+func _on_mission_fail(reason: String) -> void:
+	phase = Phase.ENDED
+	if is_instance_valid(player):
+		player.input_enabled = false
+	hud.toast(reason, 5.5)
+	await get_tree().create_timer(2.5).timeout
+	defeat.emit()
+
+
 func _on_player_gossip(npc: Node2D) -> void:
 	if phase != Phase.ACTION or held != null or Game.ap < 1:
 		hud.toast("Sem PA." if Game.ap < 1 else "Solte o objeto antes de sussurrar.")
@@ -333,14 +427,21 @@ func _commit_gossip(narrative: String) -> void:
 	if n == null:
 		return
 	Game.spend_ap(1)
+	var loc := Game.nearest_location(n.position)
 	actions_today.append({
 		"obj": null, "from": Vector2.ZERO, "cost": 1,
-		"payload": {"object_id": "", "object_name": "Sussurro para %s" % n.def.name, "tags": [], "location": Game.nearest_location(n.position),
+		"payload": {"object_id": "", "object_name": "Sussurro para %s" % n.def.name, "tags": [], "location": loc,
 			"narrative": narrative, "target_npc": n.id},
 	})
+	if narrative.strip_edges() != "":
+		Game.create_evidence("testimony", loc,
+			"%s ouviu um boato: \"%s\"" % [str(n.def.get("name", n.id)), narrative.left(60)],
+			15.0, "", "", n.id)
 	Sfx.play("confirm")
 	rings.append({"p": n.position, "age": 0.0})
 	n.show_emote("?", 2.5)
+	if mission:
+		mission.notify_npc_whispered(n.id)
 	phase = Phase.ACTION
 	player.end_interaction()
 	player.set_emotion("SMUG")
@@ -381,12 +482,25 @@ func _start_day() -> void:
 		m.position = Vector2(640, 960)
 		m.walk_to(Game.loc_pos("stall") + Vector2(0, 20))
 		m.home = Game.loc_pos("stall") + Vector2(0, 20)
-	npcs["npc_guard"].position = Game.loc_pos("castle_gate") + Vector2(0, 14)
+	var guard: NPC = npcs["npc_guard"]
+	guard.position = Game.loc_pos("castle_gate") + Vector2(0, 14)
+	if diff.patrol_enabled:
+		guard.def["wide_wander"] = true
+		guard.ambient = true
 	for npc: NPC in villagers:
 		npc.fear = int(Game.npc_state[npc.id].fear)
 		npc.anger = int(Game.npc_state[npc.id].anger)
 		npc.loyalty = int(Game.npc_state[npc.id].loyalty)
 		npc.ambient = true
+	var diff: Dictionary = Game.get_difficulty()
+	var base_susp := 0.0
+	if diff.recognition_enabled and Game.event_flags.get("player_caught", false):
+		base_susp = 15.0
+	for npc: NPC in npcs.values() + villagers:
+		npc.suspicion = base_susp
+		npc.suspicion_state = NPC.SuspicionState.CALM
+		npc._suspicion_decay_paused = false
+		npc._update_suspicion_state()
 	_snapshot()
 	hud.new_day()
 	Game.world_checkpoint = _checkpoint()
@@ -427,7 +541,7 @@ func _restore_checkpoint(saved: Dictionary) -> void:
 
 
 func _snapshot() -> void:
-	snapshot = {"instab": Game.instability, "npc": Game.npc_state.duplicate(true), "poisoned": poisoned, "fish_dead": fish_dead, "water": water_color, "rumors": Game.rumors, "obj": {}}
+	snapshot = {"instab": Game.instability, "npc": Game.npc_state.duplicate(true), "poisoned": poisoned, "fish_dead": fish_dead, "water": water_color, "rumors": Game.rumors, "obj": {}, "evidence": Game.evidence_log.duplicate(true), "events": Game.event_states.duplicate(true), "event_flags": Game.event_flags.duplicate(true), "active_events": Game.active_events.duplicate(true)}
 	snapshot["world"] = _checkpoint()
 	for id in objects:
 		snapshot.obj[id] = objects[id].position
@@ -449,6 +563,10 @@ func restart_day() -> void:
 		objects[id].attached_to = null
 	Game.set_instability(snapshot.instab)
 	Game.npc_state = snapshot.npc.duplicate(true)
+	Game.evidence_log = snapshot.evidence.duplicate(true)
+	Game.event_states = snapshot.events.duplicate(true)
+	Game.event_flags = snapshot.event_flags.duplicate(true)
+	Game.active_events = snapshot.get("active_events", []).duplicate(true)
 	poisoned = snapshot.poisoned
 	fish_dead = snapshot.fish_dead
 	water_color = snapshot.water
@@ -460,7 +578,7 @@ func restart_day() -> void:
 
 # ------------------------------------------------------------------ input
 func _unhandled_input(event: InputEvent) -> void:
-	if phase == Phase.TERMINAL or phase == Phase.ENDED:
+	if phase == Phase.TERMINAL or phase == Phase.CONFRONTATION or phase == Phase.ENDED:
 		return
 	if event is InputEventMouseButton and event.pressed:
 		match event.button_index:
@@ -533,10 +651,75 @@ func _left_click() -> void:
 
 
 func _right_click() -> void:
-	if phase != Phase.ACTION or not held:
+	if phase != Phase.ACTION and phase != Phase.ACTIVE_EVENT and phase != Phase.PURSUIT:
 		return
-	drop_pos = player.drop_position().clamp(Vector2.ZERO, Game.MAP_SIZE)
-	_request_caos("")
+	if held:
+		if phase == Phase.PURSUIT:
+			drop_pos = player.drop_position().clamp(Vector2.ZERO, Game.MAP_SIZE)
+			var o := held
+			held = null
+			player.forget_held()
+			o.drop_to(drop_pos)
+			distract_pursuers(drop_pos, 100.0)
+			hud.toast("Objeto largado como distração!", 2.0)
+			return
+		if phase != Phase.ACTION:
+			return
+		drop_pos = player.drop_position().clamp(Vector2.ZERO, Game.MAP_SIZE)
+		_request_caos("")
+		return
+	if phase == Phase.PURSUIT:
+		return
+	var mp := get_global_mouse_position()
+	_open_action_menu(_npc_at(mp), _obj_at(mp))
+
+
+func _open_action_menu(target_npc: NPC = null, target_obj: WorldObject = null) -> void:
+	var actions: Array = []
+	if target_npc:
+		var npc_actions := ["observe", "listen", "gossip", "follow", "confront", "protect", "ask_help"]
+		for action in Game.get_available_actions(false, true):
+			if npc_actions.has(action.id) and (phase == Phase.ACTION or action.id != "gossip"):
+				actions.append(action)
+	elif target_obj:
+		var object_actions: Array[String] = []
+		if target_obj.get("attached_to") and is_instance_valid(target_obj.attached_to):
+			object_actions.append("steal")
+		if target_obj.id == "sealed_letter":
+			object_actions.append("forge_letter")
+		for action in Game.get_available_actions(true, false):
+			if object_actions.has(action.id):
+				actions.append(action)
+	elif phase == Phase.ACTIVE_EVENT:
+		for action in Game.get_available_actions(false, false):
+			if action.id in ["hide", "flee"] or (action.id == "destroy_evidence" and not Game.get_evidence_at(Game.nearest_location(player.global_position)).is_empty()):
+				actions.append(action)
+	if actions.is_empty():
+		return
+	var label: String = str(target_npc.def.get("name", "NPC")) if target_npc else (str(target_obj.def.get("name", "Local")) if target_obj else "Evento")
+	hud.show_action_menu(str(label), actions,
+		func(action_id: String): _execute_context_action(action_id, target_npc, target_obj))
+
+
+func _execute_context_action(action_id: String, target_npc: NPC, target_obj: WorldObject) -> void:
+	if action_id == "gossip" and target_npc:
+		_on_player_gossip(target_npc)
+		return
+	if action_id == "confront" and target_npc:
+		_open_voluntary_confrontation(target_npc)
+		return
+	execute_action(action_id, target_npc, target_obj)
+
+
+func _open_voluntary_confrontation(npc: NPC) -> void:
+	_phase_before_confrontation = phase
+	phase = Phase.CONFRONTATION
+	player.input_enabled = false
+	var has_valuable: bool = held != null and held.def.tags.has("real")
+	var npc_id: String = npc.id
+	hud.show_confrontation(str(npc.def.get("name", "NPC")), npc_id,
+		Game.get_available_confrontation_choices(npc_id, has_valuable),
+		func(choice_id: String, result: Dictionary): _apply_confrontation(npc_id, choice_id, result))
 
 
 func _try_pick(o: WorldObject) -> bool:
@@ -550,6 +733,8 @@ func _try_pick(o: WorldObject) -> bool:
 	held = o
 	held_from = o.position
 	o.held = true
+	if mission:
+		mission.notify_object_picked(o.id)
 	Sfx.play("whoosh")
 	return true
 
@@ -597,7 +782,21 @@ func _commit_drop(p: Vector2, narrative: String) -> void:
 		"obj": o, "from": held_from, "cost": 2,
 		"payload": {"object_id": o.id, "object_name": o.def.name, "tags": o.def.tags, "location": loc, "narrative": narrative},
 	})
+	var strength := 20.0
+	for tag in o.def.tags:
+		if tag == "veneno": strength += 25.0
+		elif tag == "arma": strength += 15.0
+		elif tag == "real": strength += 20.0
+	var origin_loc: String = Game.OBJECTS.get(o.id, {}).get("loc", "")
+	if origin_loc != "" and origin_loc != loc:
+		strength += 10.0
+	Game.create_evidence("object_placed", loc,
+		"%s encontrado(a) em %s." % [o.def.name, Game.loc_name(loc)],
+		strength, o.id)
 	Sfx.play("plop")
+	var distracted := distract_pursuers(p, 72.0)
+	if distracted > 0:
+		hud.toast("O objeto distraiu %d perseguidor(es)!" % distracted, 3.0)
 	if narrative != "":
 		rings.append({"p": p, "age": 0.0})
 		Sfx.play("confirm")
@@ -671,7 +870,7 @@ func _finish_sim() -> void:
 	if not sim_running or phase != Phase.SIM:
 		return
 	sim_running = false
-	# Instability and NPC stats were committed in _on_caos_gerado, exactly once.
+	_evaluate_chain_events()
 	if Game.instability >= 100.0:
 		phase = Phase.ENDED
 		await _victory_sequence()
@@ -685,13 +884,147 @@ func _finish_sim() -> void:
 			Game.day += 1
 			_start_day()
 	else:
-		phase = Phase.ACTION
-		for npc: NPC in _ai_actors().values():
-			npc.ambient = true
-		player.input_enabled = true
-		if Game.ap == 0:
-			hud.toast("Sem PA — encerre o dia para continuar.")
+		var pending := Game.get_pending_active_events()
+		if not pending.is_empty():
+			_start_active_events(pending)
+		else:
+			_resume_action_phase()
 	hud.set_sim(false)
+
+
+func _resume_action_phase() -> void:
+	phase = Phase.ACTION
+	hud.set_active_event_mode(false)
+	hud.hide_active_event()
+	for npc: NPC in _ai_actors().values():
+		npc.ambient = true
+	player.input_enabled = true
+	if Game.ap == 0:
+		hud.toast("Sem PA — encerre o dia para continuar.")
+
+
+func _start_active_events(pending: Array) -> void:
+	_active_event_queue = pending.duplicate()
+	_begin_next_active_event()
+
+
+func _begin_next_active_event() -> void:
+	if _active_event_queue.is_empty():
+		hud.hide_active_event()
+		_resume_action_phase()
+		return
+	_active_event_current = _active_event_queue.pop_front()
+	phase = Phase.ACTIVE_EVENT
+	player.input_enabled = true
+	for npc: NPC in _ai_actors().values():
+		npc.ambient = true
+	hud.set_active_event_mode(true)
+	hud.show_active_event(_active_event_current)
+	hud.toast("EVENTO: %s" % _active_event_current.name, 3.0)
+	Sfx.play("confirm")
+	_spawn_event_npcs(_active_event_current)
+
+
+func _spawn_event_npcs(ev: Dictionary) -> void:
+	for nid in ev.npc_ids:
+		var npc: NPC = npcs.get(nid)
+		if not npc:
+			for v in villagers:
+				if v.id == nid:
+					npc = v
+					break
+		if npc and ev.location != "":
+			npc.walk_to(_resolve(ev.location))
+
+
+func _update_active_event(delta: float) -> void:
+	if _active_event_current.is_empty():
+		return
+	_active_event_current.elapsed += delta
+	var remaining: float = _active_event_current.duration - _active_event_current.elapsed
+	var risk: float = _active_event_current.risk
+	risk += delta * 2.0
+	_active_event_current.risk = clampf(risk, 0.0, 100.0)
+	hud.update_active_event_time(remaining, _active_event_current.risk)
+	if remaining <= 0.0:
+		_fail_active_event()
+
+
+func resolve_current_event(success: bool) -> void:
+	if _active_event_current.is_empty():
+		return
+	var ev_id: String = _active_event_current.id
+	Game.resolve_active_event(ev_id, success)
+	if success:
+		hud.toast("EVENTO CONCLUÍDO: %s" % _active_event_current.name, 3.0)
+		Sfx.play("confirm")
+		_exec_event_result(_active_event_current.success_action)
+	else:
+		hud.toast("EVENTO FALHOU: %s" % _active_event_current.name, 3.0)
+		Sfx.play("error")
+		_exec_event_result(_active_event_current.fail_action)
+	_active_event_current = {}
+	_begin_next_active_event()
+
+
+func _fail_active_event() -> void:
+	resolve_current_event(false)
+
+
+func _exec_event_result(action_str: String) -> void:
+	if action_str == "":
+		return
+	var parts := action_str.split(":")
+	match parts[0]:
+		"instability":
+			Game.add_instability(float(parts[1]) if parts.size() > 1 else 5.0)
+		"bump":
+			if parts.size() >= 4:
+				Game.bump(parts[1], parts[2], float(parts[3]))
+		"unlock_event":
+			if parts.size() > 1:
+				Game.set_event_state(parts[1], Game.EventState.ACTIVE)
+		"flag":
+			if parts.size() > 1:
+				Game.event_flags[parts[1]] = true
+		"evidence":
+			if parts.size() >= 3:
+				Game.create_evidence(parts[1], _active_event_current.get("location", "plaza"),
+					parts[2], 25.0)
+
+
+func _parse_ai_active_events(data: Dictionary) -> void:
+	var events: Array = data.get("active_events", [])
+	for ev_data in events:
+		if not ev_data is Dictionary:
+			continue
+		# O modelo descreve a pressão; o jogo escolhe as ações que podem resolvê-la.
+		var safe_event: Dictionary = ev_data.duplicate()
+		safe_event["success_actions"] = _safe_event_actions(ev_data)
+		Game.create_active_event(safe_event)
+
+
+func _safe_event_actions(ev_data: Dictionary) -> Array:
+	if ev_data.get("location", "") == "castle_gate":
+		return [] # só a travessia física do portão conclui este tipo de evento
+	var text := (str(ev_data.get("objective", "")) + " " + str(ev_data.get("hint", ""))).to_lower()
+	if text.contains("pista") or text.contains("prova"):
+		return ["destroy_evidence", "incriminate", "ask_help"]
+	if text.contains("persegue") or text.contains("fug") or text.contains("denunci"):
+		return ["hide", "flee", "ask_help"]
+	return ["listen", "confront", "ask_help"]
+
+
+func trigger_active_event(params: Dictionary) -> Dictionary:
+	return Game.create_active_event(params)
+
+
+func _try_resolve_active_event(action_id: String) -> void:
+	if _active_event_current.is_empty():
+		return
+	var accepted: Array = _active_event_current.get("success_actions", [])
+	if accepted.has(action_id):
+		resolve_current_event(true)
 
 
 func _dispatch(e: Dictionary) -> void:
@@ -954,9 +1287,13 @@ func emit_particle(kind: String, pos: Vector2) -> void:
 # ------------------------------------------------------------------ frame
 func _process(delta: float) -> void:
 	time += delta
+	if mission and (phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT):
+		mission.tick(delta)
+	if phase == Phase.ACTIVE_EVENT:
+		_update_active_event(delta)
 	# hover
 	var mp := get_global_mouse_position()
-	if phase == Phase.ACTION or phase == Phase.SIM:
+	if phase == Phase.ACTION or phase == Phase.SIM or phase == Phase.ACTIVE_EVENT:
 		var ho := _obj_at(mp) if not held else null
 		if ho != hovered_obj:
 			if hovered_obj:
@@ -970,7 +1307,7 @@ func _process(delta: float) -> void:
 		hud.set_hover(hovered_obj, hovered_npc)
 	if held == null and player.held_object != null:
 		player.forget_held()
-	player.input_enabled = phase == Phase.ACTION
+	player.input_enabled = phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT or phase == Phase.PURSUIT
 	if held and (phase == Phase.TERMINAL or ai_waiting):
 		held.position = drop_pos
 	# simulação
@@ -998,7 +1335,7 @@ func _process(delta: float) -> void:
 					best = n
 			if best and time - bt < 8.0:
 				cam_target = best.position
-	elif phase == Phase.ACTION or phase == Phase.TERMINAL:
+	elif phase == Phase.ACTION or phase == Phase.TERMINAL or phase == Phase.ACTIVE_EVENT:
 		cam_target = player.global_position
 	_update_cam(delta)
 	# luz ambiente
@@ -1017,6 +1354,507 @@ func _process(delta: float) -> void:
 	var amb := mod.color
 	village.night = clampf(1.0 - (amb.r + amb.g + amb.b) / 3.0 * 1.15, 0.0, 1.0)
 	shake = maxf(shake - delta * 14.0, 0.0)
+	if phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT or phase == Phase.PURSUIT:
+		_update_suspicion(delta)
+		check_player_escaped_pursuit()
+
+
+const _SUSPICIOUS_TAGS := ["veneno", "arma", "real"]
+const _SUSPICION_SIGHT_RADIUS := 96.0
+const _SUSPICION_HOT_RADIUS := 52.0
+
+func _update_suspicion(delta: float) -> void:
+	var held_tags: Array = held.def.tags if held else []
+	var player_stealth: bool = is_instance_valid(player) and player.get("state") == PlayerIntern.State.STEALTH
+	var exposure := 0.3 if player_stealth else 1.0
+	var diff: Dictionary = Game.get_difficulty()
+	var susp_rate: float = diff.suspicion_rate
+
+	for npc: NPC in npcs.values() + villagers:
+		if not npc.visible or not is_instance_valid(npc):
+			continue
+		var dist := npc.position.distance_to(player.global_position)
+		if dist > _SUSPICION_SIGHT_RADIUS:
+			npc._suspicion_decay_paused = false
+			continue
+
+		# bloqueia decay enquanto o jogador está em campo de visão
+		npc._suspicion_decay_paused = true
+
+		var base_rate := 0.0
+		for tag in held_tags:
+			if _SUSPICIOUS_TAGS.has(tag):
+				match tag:
+					"veneno": base_rate += 8.0
+					"arma":   base_rate += 5.0
+					"real":   base_rate += 6.0
+		# evidências no local onde o NPC está aumentam alerta passivo
+		var npc_loc := Game.nearest_location(npc.position)
+		var ev_str := Game.evidence_strength_at(npc_loc)
+		if ev_str > 0.0:
+			base_rate += ev_str * 0.04
+		if dist < _SUSPICION_HOT_RADIUS:
+			base_rate *= 1.5
+
+		if base_rate > 0.0:
+			var rep_mod: Dictionary = Game.reputation_modifier(npc.id)
+			npc.add_suspicion(base_rate * exposure * susp_rate * float(rep_mod.suspicion_mult) * delta)
+
+		# confronto: NPC aborda o jogador (evita repetição no mesmo ciclo)
+		if npc.suspicion_state == NPC.SuspicionState.CONFRONTING and not npc.moving and not npc.pursuing:
+			_on_npc_confronts(npc)
+	_sync_runtime_suspicion()
+
+
+func _sync_runtime_suspicion() -> void:
+	for npc: NPC in _ai_actors().values():
+		if Game.npc_state.has(npc.id):
+			Game.npc_state[npc.id]["suspicion"] = npc.suspicion
+
+
+func _on_npc_confronts(npc: NPC) -> void:
+	Game.bump(npc.id, "anger", 15.0)
+	Game.bump(npc.id, "loyalty", 5.0)
+	var loc := Game.nearest_location(npc.position)
+	var obj_desc: String = str(held.def.name) if held else "algo suspeito"
+	Game.create_evidence("witness", loc,
+		"%s viu o Estagiário com %s perto de %s." % [
+			str(npc.def.get("name", npc.id)), obj_desc, Game.loc_name(loc)],
+		30.0, held.id if held else "", Game.player_name, npc.id)
+	hud.toast("%s está te perseguindo!" % str(npc.def.get("name", "NPC")), 4.0)
+	Sfx.play("tension")
+	emit_particle("exclamation", npc.position)
+	var diff: Dictionary = Game.get_difficulty()
+	var dur_range: Dictionary = diff.pursuit_duration
+	var dur_min: float = dur_range.keys()[0]
+	var dur_max: float = dur_range.values()[0]
+	npc.pursue_speed_mult = diff.pursuit_speed
+	npc.start_pursuit(player, randf_range(dur_min, dur_max))
+	hud.add_event_log("%s iniciou uma perseguição!" % str(npc.def.get("name", "NPC")))
+	if phase == Phase.ACTION:
+		phase = Phase.PURSUIT
+		player.input_enabled = true
+
+
+func _on_npc_catches_player(npc: NPC) -> void:
+	_sync_runtime_suspicion()
+	_phase_before_confrontation = phase
+	phase = Phase.CONFRONTATION
+	Game.event_flags["player_caught"] = true
+	npc.stop_pursuit("caught")
+	npc.say("Te peguei!", 3.0)
+	npc.show_emote("!", 2.5)
+	Sfx.play("thud")
+	shake = 5.0
+	player.input_enabled = false
+	player.set_emotion("PANIC")
+	for other_npc: NPC in npcs.values() + villagers:
+		if other_npc.pursuing and other_npc != npc:
+			other_npc.stop_pursuit("caught")
+	var has_valuable := false
+	if held:
+		for tag in held.def.tags:
+			if tag in ["valioso", "real", "ouro"]:
+				has_valuable = true
+	var choices := Game.get_available_confrontation_choices(npc.id, has_valuable)
+	var npc_name: String = str(npc.def.get("name", "NPC"))
+	var npc_id: String = npc.id
+	hud.show_confrontation(npc_name, npc_id, choices,
+		func(choice_id: String, result: Dictionary): _apply_confrontation(npc_id, choice_id, result))
+
+
+func _apply_confrontation(npc_id: String, choice_id: String, result: Dictionary) -> void:
+	var npc: NPC = npcs.get(npc_id)
+	if not npc:
+		for v in villagers:
+			if v.id == npc_id:
+				npc = v
+				break
+	var effects: Dictionary = result.get("npc_effects", {})
+	for stat in effects:
+		Game.bump(npc_id, stat, float(effects[stat]))
+	if result.suspicion_delta != 0.0 and npc:
+		if result.suspicion_delta > 0:
+			npc.add_suspicion(result.suspicion_delta)
+		else:
+			npc.reduce_suspicion(-result.suspicion_delta)
+	if result.instability_delta != 0.0:
+		Game.add_instability(result.instability_delta)
+	if result.get("reputation_delta", 0.0) != 0.0:
+		Game.change_reputation_for_npc(npc_id, float(result.reputation_delta))
+	var loc := Game.nearest_location(player.global_position)
+	if not result.success:
+		Game.create_evidence("witness", loc,
+			"%s confrontou o Estagiário." % str(Game.NPC_DEFS.get(npc_id, Game.VILLAGER_DEFS.get(npc_id, {})).get("name", npc_id)),
+			30.0, "", Game.player_name, npc_id)
+	if result.get("flee", false):
+		player.set_emotion("PANIC")
+		if npc:
+			npc.start_pursuit(player, 8.0)
+	else:
+		if npc:
+			npc.suspicion = clampf(npc.suspicion, 0.0, 60.0)
+			npc._update_suspicion_state()
+	if choice_id == "bribe" and result.success and held:
+		held.held = false
+		held.position = npc.position + Vector2(0, 4) if npc else player.global_position
+		held = null
+		player.forget_held()
+		hud.toast("Você entregou o item como suborno.", 3.0)
+	phase = _phase_before_confrontation if _phase_before_confrontation != Phase.CONFRONTATION else Phase.ACTION
+	player.input_enabled = phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT or phase == Phase.PURSUIT
+	hud.hide_confrontation()
+
+
+func _on_npc_calls_backup(caller: NPC) -> void:
+	var backup_range := 120.0
+	var all_npcs: Array = npcs.values() + villagers
+	for npc: NPC in all_npcs:
+		if npc == caller or npc.pursuing or npc.fallen or not npc.visible:
+			continue
+		if npc.global_position.distance_to(caller.global_position) < backup_range:
+			if npc.suspicion >= NPC.SUSPICION_ALERT or int(npc.def.get("loyalty", 100)) > 60:
+				npc.start_pursuit(player, randf_range(8.0, 12.0))
+				rings.append({"p": caller.position, "age": 0.0, "shout": true})
+				break
+
+
+func check_player_escaped_pursuit() -> void:
+	var stealth: bool = is_instance_valid(player) and player.get("state") == PlayerIntern.State.STEALTH
+	for npc: NPC in npcs.values() + villagers:
+		if not npc.pursuing:
+			continue
+		var dist := npc.global_position.distance_to(player.global_position)
+		if stealth and dist > 80.0:
+			npc.pursue_lost_timer += 0.5
+		if _is_player_hidden():
+			npc.pursue_lost_timer += 1.0
+	_check_pursuit_ended()
+
+
+func _check_pursuit_ended() -> void:
+	if phase != Phase.PURSUIT:
+		return
+	for npc: NPC in npcs.values() + villagers:
+		if npc.pursuing:
+			return
+	phase = Phase.ACTION
+	hud.toast("Você escapou!", 2.0)
+	Sfx.play("relief")
+
+
+func _is_player_hidden() -> bool:
+	if not is_instance_valid(player):
+		return false
+	var p := player.global_position
+	if p.y < 200.0 and p.x > 560.0 and p.x < 720.0:
+		return false
+	for loc_id in Game.LOCATIONS:
+		var loc_data: Dictionary = Game.LOCATIONS[loc_id]
+		if loc_id in ["bakery", "forge", "temple", "residence"]:
+			var loc_pos: Vector2 = loc_data.pos
+			if p.distance_to(loc_pos) < 32.0:
+				return true
+	return false
+
+
+func distract_pursuers(distraction_pos: Vector2, radius := 80.0) -> int:
+	var count := 0
+	for npc: NPC in npcs.values() + villagers:
+		if not npc.pursuing:
+			continue
+		if npc.global_position.distance_to(distraction_pos) < radius:
+			npc.stop_pursuit("distracted")
+			npc.walk_to(distraction_pos, true)
+			npc.show_emote("?", 2.0)
+			count += 1
+	_check_pursuit_ended()
+	return count
+
+
+func execute_action(action_id: String, target_npc: NPC = null, target_obj: WorldObject = null) -> bool:
+	var has_npc := target_npc != null
+	var has_item := held != null or target_obj != null
+	var check := Game.can_do_action(action_id, has_item, has_npc)
+	if not check.ok:
+		hud.toast(check.reason)
+		Sfx.play("error")
+		return false
+	var def: Dictionary = Game.ACTION_DEFS[action_id]
+	var cost: int = def.cost
+	if cost > 0:
+		Game.spend_ap(cost)
+	var noise: float = def.noise
+	var susp: float = def.suspicion
+	var player_stealth: bool = is_instance_valid(player) and player.get("state") == PlayerIntern.State.STEALTH
+	if player_stealth:
+		noise *= 0.3
+		susp *= 0.3
+	if noise > 0.0:
+		_apply_noise(player.global_position, noise)
+	if susp != 0.0:
+		_apply_suspicion_burst(player.global_position, susp)
+	_apply_action_specific(action_id, target_npc, target_obj)
+	_try_resolve_active_event(action_id)
+	_evaluate_chain_events()
+	if phase == Phase.ACTION:
+		var pending_events := Game.get_pending_active_events()
+		if not pending_events.is_empty():
+			_start_active_events(pending_events)
+	actions_today.append({
+		"action_id": action_id,
+		"obj": target_obj, "from": target_obj.position if target_obj else Vector2.ZERO,
+		"cost": cost,
+		"payload": {"action": action_id, "target_npc": target_npc.id if target_npc else "",
+			"object_id": target_obj.id if target_obj else (held.id if held else ""),
+			"location": Game.nearest_location(player.global_position)},
+	})
+	hud.toast(def.name, 2.0)
+	return true
+
+
+func _apply_noise(origin: Vector2, noise_level: float) -> void:
+	var radius := noise_level * 6.0
+	for npc: NPC in npcs.values() + villagers:
+		if not npc.visible or not is_instance_valid(npc):
+			continue
+		var dist := npc.position.distance_to(origin)
+		if dist < radius:
+			var intensity := (1.0 - dist / radius) * noise_level * 0.5
+			npc.add_suspicion(intensity)
+			if noise_level > 20.0 and dist < radius * 0.5:
+				npc.show_emote("?", 1.5)
+	if noise_level > 15.0:
+		rings.append({"p": origin, "age": 0.0, "shout": noise_level > 25.0})
+
+
+func _apply_suspicion_burst(origin: Vector2, amount: float) -> void:
+	for npc: NPC in npcs.values() + villagers:
+		if not npc.visible or not is_instance_valid(npc):
+			continue
+		var dist := npc.position.distance_to(origin)
+		if dist < _SUSPICION_SIGHT_RADIUS:
+			if amount > 0.0:
+				npc.add_suspicion(amount * (1.0 - dist / _SUSPICION_SIGHT_RADIUS))
+			elif amount < 0.0:
+				npc.reduce_suspicion(-amount)
+
+
+func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: WorldObject) -> void:
+	var loc := Game.nearest_location(player.global_position)
+	match action_id:
+		"observe":
+			if target_npc:
+				hud.show_npc(target_npc, true)
+				player.set_emotion("SUSPICIOUS")
+				var _watch_t := 3.0
+				if mission:
+					if target_npc.id == "npc_guard":
+						mission.notify_object_picked("observe_guard")
+		"listen":
+			if target_npc:
+				player.set_emotion("SUSPICIOUS")
+				var saved: Dictionary = Game.npc_state.get(target_npc.id, {})
+				var memories: Array = saved.get("memories", [])
+				if not memories.is_empty():
+					var last: String = memories.back()
+					Game.create_evidence("overheard", loc,
+						"Ouviu %s dizer: \"%s\"" % [str(target_npc.def.get("name", "")), last.left(50)],
+						10.0, "", "", target_npc.id)
+					hud.toast("Você ouviu algo útil de %s." % str(target_npc.def.get("name", "")), 3.0)
+				else:
+					hud.toast("%s não disse nada interessante." % str(target_npc.def.get("name", "")), 2.5)
+		"gossip":
+			pass # já tratado pelo sistema existente de sussurro
+		"plant_object":
+			pass # já tratado pelo sistema existente de soltar objeto
+		"steal":
+			if target_obj and is_instance_valid(target_obj):
+				if target_obj.get("attached_to") and is_instance_valid(target_obj.attached_to):
+					var owner_npc: NPC = target_obj.attached_to
+					target_obj.attached_to = null
+					target_obj.position = player.global_position + Vector2(0, 4)
+					Game.create_evidence("break_in", loc,
+						"%s desapareceu de %s." % [target_obj.def.name, str(owner_npc.def.get("name", ""))],
+						25.0, target_obj.id, "", owner_npc.id)
+					owner_npc.show_emote("!", 2.0)
+					Sfx.play("whoosh")
+		"forge_letter":
+			if not target_obj or target_obj.id != "sealed_letter":
+				hud.toast("Você precisa selecionar uma carta selada.", 2.5)
+				Game.refund_ap(1)
+				return
+			Game.create_evidence("forged_letter", loc,
+				"Uma carta falsificada foi preparada com conteúdo incriminador.",
+				30.0, "sealed_letter")
+			hud.toast("Carta falsificada com sucesso.", 3.0)
+			Sfx.play("confirm")
+		"follow":
+			if target_npc:
+				player.set_emotion("SUSPICIOUS")
+				hud.toast("Seguindo %s..." % str(target_npc.def.get("name", "")), 2.5)
+		"confront":
+			if target_npc:
+				player.set_emotion("NERVOUS")
+				var evidence_list := Game.get_evidence_about(target_npc.id)
+				if evidence_list.is_empty():
+					hud.toast("Você não tem provas contra %s." % str(target_npc.def.get("name", "")), 3.0)
+					Game.refund_ap(1)
+				else:
+					target_npc.show_emote("!", 3.0)
+					target_npc.say("Do que está me acusando?!", 4.0)
+					Game.bump(target_npc.id, "anger", 20.0)
+					Game.bump(target_npc.id, "loyalty", -10.0)
+					target_npc.hurt_mood(0.5, 0.3)
+		"incriminate":
+			if target_npc and (held or target_obj):
+				var obj := target_obj if target_obj else held
+				Game.create_evidence("object_placed", loc,
+					"%s encontrado(a) nas posses de %s." % [obj.def.name, str(target_npc.def.get("name", ""))],
+					35.0, obj.id, target_npc.id)
+				Game.bump(target_npc.id, "loyalty", -15.0)
+				hud.toast("Evidência plantada contra %s." % str(target_npc.def.get("name", "")), 3.0)
+				Sfx.play("confirm")
+		"protect":
+			if target_npc:
+				Game.bump(target_npc.id, "loyalty", 20.0)
+				var against := Game.get_evidence_about(target_npc.id)
+				for ev in against:
+					ev.strength = maxf(ev.strength - 10.0, 0.0)
+				target_npc.say("Obrigado, amigo.", 3.0)
+				target_npc.show_emote("<3", 2.0)
+				hud.toast("Você protegeu %s." % str(target_npc.def.get("name", "")), 3.0)
+		"hide":
+			player.set_emotion("NERVOUS")
+			hud.toast("Escondido... suspeita reduzida.", 2.5)
+		"ask_help":
+			if target_npc:
+				var loyalty: float = float(Game.npc_state.get(target_npc.id, {}).get("loyalty", 100))
+				if loyalty < 40:
+					target_npc.say("Vou te ajudar.", 3.0)
+					target_npc.show_emote("<3", 2.0)
+					Game.bump(target_npc.id, "loyalty", -10.0)
+					hud.toast("%s está do seu lado." % str(target_npc.def.get("name", "")), 3.0)
+				else:
+					target_npc.say("Não tenho o que falar com você.", 3.0)
+					target_npc.show_emote("...", 2.0)
+					hud.toast("%s recusou ajuda." % str(target_npc.def.get("name", "")), 3.0)
+		"destroy_evidence":
+			var loc_ev := Game.get_evidence_at(loc)
+			if loc_ev.is_empty():
+				hud.toast("Não há pistas para destruir aqui.", 2.5)
+				Game.refund_ap(1)
+			else:
+				var ev: Dictionary = loc_ev[0]
+				Game.destroy_evidence(ev.id)
+				hud.toast("Pista destruída: %s" % ev.description.left(40), 3.0)
+				Sfx.play("confirm")
+				emit_particle("smoke_thin", player.global_position)
+		"flee":
+			player.set_emotion("PANIC")
+			Sfx.play("whoosh")
+			for npc: NPC in npcs.values() + villagers:
+				if npc.pursuing:
+					npc.pursue_lost_timer += 1.5
+
+
+func _evaluate_chain_events() -> void:
+	_sync_runtime_suspicion()
+	var changes := Game.evaluate_events()
+	for ch in changes:
+		match ch.state:
+			"AVAILABLE":
+				hud.toast("Evento disponível: %s" % ch.title, 3.0)
+			"ACTIVE":
+				hud.toast("Evento em andamento: %s" % ch.title, 3.5)
+				Sfx.play("confirm")
+			"RESOLVED":
+				hud.toast("Evento concluído: %s" % ch.title, 4.0)
+				Sfx.play("coins")
+				_apply_event_effects(ch.id)
+			"FAILED":
+				hud.toast("Evento fracassou: %s" % ch.title, 4.0)
+				Sfx.play("error")
+	_refresh_chain_panel()
+	if Game.get_event_state("king_deposed") == Game.EventState.RESOLVED:
+		if Game.instability < 100.0:
+			Game.set_instability(100.0)
+
+
+func _refresh_chain_panel() -> void:
+	var chain: Array = []
+	for eid in Game.EVENT_DEFS:
+		var def: Dictionary = Game.EVENT_DEFS[eid]
+		var st: int = Game.get_event_state(eid)
+		chain.append({
+			"label": def.title,
+			"done": st == Game.EventState.RESOLVED,
+			"active": st == Game.EventState.ACTIVE or st == Game.EventState.AVAILABLE,
+		})
+	hud.update_chain_panel(chain)
+
+
+func _apply_event_effects(event_id: String) -> void:
+	match event_id:
+		"guard_interrogates":
+			var guard: NPC = npcs.get("npc_guard")
+			if guard:
+				guard.walk_to(Game.loc_pos("plaza"), true)
+				guard.say("Alguém aqui tem explicações a dar!", 4.0)
+			trigger_active_event({
+				"name": "Investigação na Praça",
+				"objective": "Impeça o guarda de encontrar provas contra você",
+				"duration": 20.0, "risk": 55.0,
+				"npc_ids": ["npc_guard", "npc_baker"],
+			"hint": "Destrua evidências ou distraia o guarda",
+			"consequences": "Se falhar, sua identidade pode ser revelada",
+			"location": "plaza",
+			"success_actions": ["destroy_evidence", "incriminate", "ask_help"],
+			"success_action": "bump:npc_guard:anger:10",
+				"fail_action": "instability:-10",
+			})
+		"guard_leaves_post":
+			var guard2: NPC = npcs.get("npc_guard")
+			if guard2:
+				guard2.walk_to(Game.loc_pos("forge"), true)
+				guard2.say("Preciso ver o que está acontecendo!", 3.5)
+			if mission:
+				mission.phase = MissionPortao.MPhase.TENSE
+			trigger_active_event({
+				"name": "Portão Desguarnecido",
+				"objective": "Aproveite a ausência do guarda para cruzar o portão",
+				"duration": 22.0, "risk": 40.0,
+				"npc_ids": ["npc_guard", "villager_elder"],
+			"hint": "Cuidado com o Ancião Osric observando",
+			"consequences": "O guarda vai voltar em breve",
+			"location": "castle_gate",
+			"success_actions": [],
+			"success_action": "",
+				"fail_action": "bump:npc_guard:anger:15",
+			})
+		"witness_appears":
+			var elder: NPC = null
+			for v in villagers:
+				if v.id == "villager_elder":
+					elder = v
+					break
+			if elder:
+				elder.walk_to(Game.loc_pos("plaza"))
+				elder.say("Eu vi algo estranho acontecendo...", 4.0)
+			trigger_active_event({
+				"name": "Testemunha Inconveniente",
+				"objective": "Impeça o ancião de denunciá-lo",
+				"duration": 18.0, "risk": 62.0,
+				"npc_ids": ["villager_elder"],
+			"hint": "Convença-o com um boato ou distraia-o com um objeto",
+			"consequences": "Se o ancião falar, a suspeita sobre você aumenta muito",
+			"location": "plaza",
+			"success_actions": ["ask_help", "incriminate", "hide"],
+			"success_action": "bump:villager_elder:loyalty:-20",
+				"fail_action": "instability:-15",
+			})
+		"king_deposed":
+			Game.set_instability(100.0)
 
 
 func _update_cam(_delta: float) -> void:
@@ -1030,7 +1868,7 @@ func _update_cam(_delta: float) -> void:
 	# Ação/terminal: câmera do jogador; simulação/cinemáticas: câmera do mundo (segue NPCs).
 	player.camera.zoom = cam.zoom
 	player.camera.offset = cam.offset
-	if phase == Phase.ACTION or phase == Phase.TERMINAL:
+	if phase == Phase.ACTION or phase == Phase.TERMINAL or phase == Phase.ACTIVE_EVENT or phase == Phase.PURSUIT:
 		if not player.camera.is_current():
 			player.camera.make_current()
 		cam.position = player.camera.get_screen_center_position()

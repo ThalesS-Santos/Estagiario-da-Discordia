@@ -31,7 +31,18 @@ export function sanitizeRequest(body, maxNpcs = 64) {
   const context = {
     day: clampInt(c.day, 1, 3, 1), max_days: 3,
     instability: clampInt(c.instability, 0, 100, 0), rumors: clampInt(c.rumors, 0, 10000, 0),
+    ap_remaining: clampInt(c.ap_remaining, 0, 10, 0),
   };
+  if (Array.isArray(c.evidence)) context.evidence = c.evidence.slice(0, 20);
+  if (Array.isArray(c.chain_events)) context.chain_events = c.chain_events.slice(0, 10);
+  if (Array.isArray(c.active_events_in_progress)) context.active_events_in_progress = c.active_events_in_progress.slice(0, 5);
+  if (c.mission && typeof c.mission === "object") context.mission = c.mission;
+  if (c.player_position && typeof c.player_position === "object") {
+    context.player_position = { x: clampInt(c.player_position.x, 0, 1280, 640), y: clampInt(c.player_position.y, 0, 960, 480) };
+  }
+  if (c.player_stealth === true) context.player_stealth = true;
+  if (typeof c.held_object === "string" && c.held_object) context.held_object = c.held_object.slice(0, 60);
+  if (c.constraints && typeof c.constraints === "object") context.constraints = c.constraints;
   return { ok: true, value: { action, gossip, npcs, context } };
 }
 
@@ -50,7 +61,7 @@ export function sanitizeEffect(data, allowedNpcs) {
     seen.add(id);
     const target = typeof u.target_node_to_move === "string" ? u.target_node_to_move : "";
     const targetOk = target === "" || LOCATION_IDS.has(target) || (NPC_IDS.has(target) && allowedNpcs.has(target) && target !== id);
-    updates.push({
+    const upd = {
       npc_id: id,
       dialogue_bubble: String(u.dialogue_bubble ?? "").trim().slice(0, 240),
       new_state: STATES.includes(u.new_state) ? u.new_state : "TALK",
@@ -58,10 +69,44 @@ export function sanitizeEffect(data, allowedNpcs) {
       fear_level: clampInt(u.fear_level, 0, 100, 0),
       anger_level: clampInt(u.anger_level, 0, 100, 0),
       loyalty_level: clampInt(u.loyalty_level, 0, 100, 50),
-    });
+    };
+    const sd = clampInt(u.suspicion_delta, -30, 30, null);
+    if (sd !== null) upd.suspicion_delta = sd;
+    updates.push(upd);
   }
   if (updates.length === 0) return null;
-  return { schema_version: 1, instability_delta: delta, npc_updates: updates };
+  const result = { schema_version: 1, instability_delta: delta, npc_updates: updates };
+  if (Array.isArray(data.active_events)) {
+    result.active_events = data.active_events
+      .filter(e => e && typeof e === "object" && e.name)
+      .slice(0, 3)
+      .map(e => ({
+        name: String(e.name ?? "").slice(0, 80),
+        objective: String(e.objective ?? "").slice(0, 120),
+        duration: Math.max(5, Math.min(60, Number(e.duration) || 20)),
+        risk: Math.max(0, Math.min(100, Number(e.risk) || 50)),
+        npc_ids: Array.isArray(e.npc_ids)
+          ? [...new Set(e.npc_ids.filter(id => typeof id === "string" && allowedNpcs.has(id)))].slice(0, 5)
+          : [],
+        hint: String(e.hint ?? "").slice(0, 120),
+        consequences: String(e.consequences ?? "").slice(0, 120),
+        location: LOCATION_IDS.has(String(e.location ?? "")) ? String(e.location) : "",
+      }));
+  }
+  const EVIDENCE_TYPES = ["weapon_found", "object_placed", "testimony", "overheard", "break_in", "forged_letter", "witness"];
+  if (Array.isArray(data.evidence_created)) {
+    result.evidence_created = data.evidence_created
+      .filter(e => e && typeof e === "object" && typeof e.type === "string" && EVIDENCE_TYPES.includes(e.type))
+      .slice(0, 3)
+      .map(e => ({
+        type: e.type,
+        strength: clampInt(e.strength, 1, 50, 10),
+        description: String(e.description ?? "").slice(0, 160),
+        location: LOCATION_IDS.has(String(e.location ?? "")) ? String(e.location) : "",
+      }));
+    if (result.evidence_created.length === 0) delete result.evidence_created;
+  }
+  return result;
 }
 
 /** Extrai JSON do texto do modelo (tolera cercas de markdown). */
