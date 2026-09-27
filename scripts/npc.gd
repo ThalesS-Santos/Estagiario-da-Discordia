@@ -135,12 +135,12 @@ func _build_sprites() -> void:
 	ui.z_index = 10
 	add_child(ui)
 	bubble_label = Label.new()
-	bubble_label.position = Vector2(-100, -118)
-	bubble_label.size = Vector2(200, 64)
+	bubble_label.position = Vector2(-85, -104)
+	bubble_label.size = Vector2(170, 52)
 	bubble_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	bubble_label.add_theme_stylebox_override("normal", _bubble_box)
 	bubble_label.add_theme_color_override("font_color", Color(0.16, 0.12, 0.2))
-	bubble_label.add_theme_font_size_override("font_size", 13)
+	bubble_label.add_theme_font_size_override("font_size", 11)
 	bubble_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bubble_label.z_index = 11
 	bubble_label.visible = false
@@ -464,15 +464,15 @@ func draw_ui(c: CanvasItem) -> void:
 	var font := ThemeDB.fallback_font
 	if world and world.show_names and not decor and str(def.get("name", "")) != "":
 		var nm := str(def.name)
-		var tw := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-		c.draw_rect(Rect2(-tw / 2.0 - 5, 4, tw + 10, 16), Color(0.04, 0.05, 0.08, 0.88))
-		c.draw_rect(Rect2(-tw / 2.0 - 5, 4, tw + 10, 16), Color(1.0, 0.85, 0.35, 0.6), false, 1.0)
-		c.draw_string(font, Vector2(-tw / 2.0, 16), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 1))
+		var tw := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		c.draw_rect(Rect2(-tw / 2.0 - 3, 4, tw + 6, 13), Color(0.04, 0.05, 0.08, 0.88))
+		c.draw_rect(Rect2(-tw / 2.0 - 3, 4, tw + 6, 13), Color(1.0, 0.85, 0.35, 0.5), false, 1.0)
+		c.draw_string(font, Vector2(-tw / 2.0, 14), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 1, 1, 1))
 	if suspicion >= SUSPICION_ALERT:
-		var bar_w := 28.0
-		var bar_h := 4.0
+		var bar_w := 22.0
+		var bar_h := 3.0
 		var bar_x := -bar_w / 2.0
-		var bar_y := 22.0
+		var bar_y := 20.0
 		var fill := suspicion / 100.0 * bar_w
 		var col: Color
 		match suspicion_state:

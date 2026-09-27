@@ -1004,39 +1004,39 @@ func set_loading(waiting: bool) -> void:
 
 
 func _build_card() -> void:
-	card = _9patch(tex_panel, [4, 4, 4, 4], Vector2(300, 0))
+	card = _9patch(tex_panel, [4, 4, 4, 4], Vector2(256, 0))
 	card.position = Vector2(12, 720 - 240)
 	card.visible = false
 	ui.add_child(card)
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_bottom", 10)
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(margin)
 	card_vbox = VBoxContainer.new()
-	card_vbox.add_theme_constant_override("separation", 4)
+	card_vbox.add_theme_constant_override("separation", 3)
 	card_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_child(card_vbox)
-	card_title = _label("", 16, Color(1.0, 0.85, 0.35))
+	card_title = _label("", 14, Color(1.0, 0.85, 0.35))
 	card_vbox.add_child(card_title)
-	card_role = _label("", 12, Color(0.7, 0.9, 0.8))
+	card_role = _label("", 11, Color(0.7, 0.9, 0.8))
 	card_vbox.add_child(card_role)
 	# separator
 	var sep := TextureRect.new()
 	sep.texture = tex_separator
-	sep.custom_minimum_size = Vector2(260, 6)
+	sep.custom_minimum_size = Vector2(218, 6)
 	sep.stretch_mode = TextureRect.STRETCH_TILE
 	sep.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card_vbox.add_child(sep)
 	# stat rows
-	var stat_names := ["Medo", "Raiva", "Lealdade", "Cred."]
+	var stat_names := ["Medo", "Raiva", "Leal.", "Cred."]
 	var stat_colors := [Color(0.42, 0.68, 0.92), Color(0.92, 0.38, 0.28), Color(0.95, 0.78, 0.28), Color(0.35, 0.72, 0.65)]
 	for i in 4:
 		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 6)
+		row.add_theme_constant_override("separation", 5)
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		# icon
 		var icon := TextureRect.new()
@@ -1044,57 +1044,57 @@ func _build_card() -> void:
 		atlas.atlas = tex_stat_icons
 		atlas.region = Rect2(i * 10, 0, 10, 10)
 		icon.texture = atlas
-		icon.custom_minimum_size = Vector2(20, 20)
+		icon.custom_minimum_size = Vector2(16, 16)
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_child(icon)
-		var name_l := _label(stat_names[i], 12, stat_colors[i])
-		name_l.custom_minimum_size.x = 62
+		var name_l := _label(stat_names[i], 11, stat_colors[i])
+		name_l.custom_minimum_size.x = 50
 		row.add_child(name_l)
 		var bar_holder := StatBar.new()
 		bar_holder.stat_index = i
 		bar_holder.tex_fill = tex_stat_fill
 		bar_holder.tex_bg = tex_stat_bg
 		row.add_child(bar_holder)
-		var val_l := _label("0", 12, Color(0.85, 0.9, 0.95))
-		val_l.custom_minimum_size.x = 28
+		var val_l := _label("0", 11, Color(0.85, 0.9, 0.95))
+		val_l.custom_minimum_size.x = 24
 		val_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(val_l)
 		card_vbox.add_child(row)
 		stat_rows.append({"bar": bar_holder, "val": val_l})
 	# suspicion row
 	var susp_row := HBoxContainer.new()
-	susp_row.add_theme_constant_override("separation", 6)
+	susp_row.add_theme_constant_override("separation", 5)
 	susp_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var susp_icon := TextureRect.new()
 	var susp_atlas := AtlasTexture.new()
 	susp_atlas.atlas = tex_stat_icons
 	susp_atlas.region = Rect2(0, 0, 10, 10)
 	susp_icon.texture = susp_atlas
-	susp_icon.custom_minimum_size = Vector2(20, 20)
+	susp_icon.custom_minimum_size = Vector2(16, 16)
 	susp_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	susp_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	susp_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	susp_icon.modulate = Color(1.0, 0.5, 0.2)
 	susp_row.add_child(susp_icon)
-	var susp_name := _label("Suspeita", 12, Color(1.0, 0.5, 0.2))
-	susp_name.custom_minimum_size.x = 62
+	var susp_name := _label("Suspeita", 11, Color(1.0, 0.5, 0.2))
+	susp_name.custom_minimum_size.x = 50
 	susp_row.add_child(susp_name)
 	card_susp_bar = StatBar.new()
 	card_susp_bar.stat_index = -1
 	card_susp_bar.tex_fill = tex_stat_fill
 	card_susp_bar.tex_bg = tex_stat_bg
 	susp_row.add_child(card_susp_bar)
-	card_susp_val = _label("0", 12, Color(1.0, 0.5, 0.2))
-	card_susp_val.custom_minimum_size.x = 28
+	card_susp_val = _label("0", 11, Color(1.0, 0.5, 0.2))
+	card_susp_val.custom_minimum_size.x = 24
 	card_susp_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	susp_row.add_child(card_susp_val)
 	card_vbox.add_child(susp_row)
 	# separator 2
 	var sep2 := TextureRect.new()
 	sep2.texture = tex_separator
-	sep2.custom_minimum_size = Vector2(260, 6)
+	sep2.custom_minimum_size = Vector2(218, 6)
 	sep2.stretch_mode = TextureRect.STRETCH_TILE
 	sep2.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	sep2.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1477,40 +1477,90 @@ func show_tutorial() -> void:
 	tut_step = 0
 	tutorial_panel = Control.new()
 	tutorial_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	tutorial_panel.z_index = 30
 	ui.add_child(tutorial_panel)
+	# Overlay semitransparente para destacar o painel
+	var dim := ColorRect.new()
+	dim.name = "_tut_dim"
+	dim.color = Color(0.0, 0.0, 0.05, 0.70)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tutorial_panel.add_child(dim)
 	_tut_render()
 
 
 func _tut_render() -> void:
+	# Remove tudo exceto o overlay dim
 	for c in tutorial_panel.get_children():
-		c.queue_free()
-	var steps := [
-		["OBSERVAÇÃO", "Ande com WASD (Shift = furtivo). Passe o mouse sobre os NPCs para ver seus atributos.", Vector2(330, 500)],
-		["OBJETO", "Chegue perto de um objeto e clique nele para pegá-lo. Custa 1 PA.", Vector2(400, 240)],
-		["MOVA", "Leve o objeto para outro local e clique para soltá-lo. Ou aperte E atrás de um NPC para sussurrar (1 PA).", Vector2(400, 240)],
-		["NARRATIVA", "Digite o boato que conecta o objeto ao caos. ENTER confirma, ESC cancela.", Vector2(290, 150)],
-		["OBSERVE", "A IA fará o resto. Você é apenas o catalisador.", Vector2(400, 240)],
-		["INSTABILIDADE", "Quando a barra chegar a 100%, o Rei cai. Você tem 3 dias.  [Z] desfaz  [TAB] status", Vector2(330, 120)],
+		if c.name != "_tut_dim":
+			c.queue_free()
+
+	var steps: Array[Array] = [
+		["MOVIMENTO", "Use WASD para andar.\nShift mantém o passo furtivo — guardas são menos alertas.\n\nPasse o mouse sobre NPCs para ver o card de atributos.",
+		 "  WASD  mover\n  Shift  furtivo\n  TAB  painel de status\n  Z  desfazer"],
+		["PEGAR OBJETO", "Chegue perto de um objeto brilhante e clique nele.\nCada ação custa 1 PA — você tem 3 por dia.\n\nLeve o objeto para outro lugar e clique para soltá-lo.\nUm terminal aparece: escreva o boato que conecta o objeto ao caos.",
+		 "  Clique  pegar / soltar\n  Botão dir.  soltar sem narrativa\n  ESC  cancelar terminal"],
+		["SUSSURRAR", "Para convencer um NPC, posicione-se atrás ou ao lado dele.\nPressione E (ou clique no NPC com objeto) para sussurrar.\n\nEscreva o que quer que ele acredite. A IA decide como o NPC reage.",
+		 "  E  sussurrar (1 PA)\n  Fique atrás ou ao lado\n  Não na frente!"],
+		["OBJETIVO", "A barra de Instabilidade Social no canto superior esquerdo precisa chegar a 100%.\nQuando isso acontecer, o Rei Aldemar cai — vitória.\n\nVocê tem 3 dias. Se não chegar a 100% ao final do Dia 3: derrota.",
+		 "  3 dias\n  3 PA por dia\n  Sem violência"],
 	]
+
 	var s: Array = steps[tut_step]
-	var pc := _9patch(tex_panel, [4, 4, 4, 4], Vector2(560, 0))
-	pc.position = s[2]
+	# Painel centralizado
+	var pc := _9patch(tex_panel, [4, 4, 4, 4], Vector2(680, 0))
+	pc.position = Vector2(300, 140)
 	pc.modulate.a = 0.0
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_bottom", 10)
-	pc.add_child(margin)
+	pc.z_index = 31
+
+	var outer := MarginContainer.new()
+	outer.add_theme_constant_override("margin_left", 20)
+	outer.add_theme_constant_override("margin_top", 14)
+	outer.add_theme_constant_override("margin_right", 20)
+	outer.add_theme_constant_override("margin_bottom", 14)
+	pc.add_child(outer)
+
 	var v := VBoxContainer.new()
-	margin.add_child(v)
-	v.add_child(_label("PASSO %d/%d — %s" % [tut_step + 1, steps.size(), s[0]], 18, Color(1.0, 0.85, 0.35)))
-	var t := _label(s[1], 15, Color(0.85, 1.0, 0.9))
-	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	t.custom_minimum_size.x = 520
-	v.add_child(t)
+	v.add_theme_constant_override("separation", 8)
+	outer.add_child(v)
+
+	# Cabeçalho com número e título
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 10)
+	v.add_child(hbox)
+	var step_num := _label("%d/%d" % [tut_step + 1, steps.size()], 11, Color(0.55, 0.65, 0.60))
+	step_num.custom_minimum_size.x = 28
+	hbox.add_child(step_num)
+	hbox.add_child(_label(s[0], 18, Color(1.0, 0.85, 0.35)))
+
+	# Linha separadora
+	var sep := ColorRect.new()
+	sep.color = Color(0.3, 0.4, 0.35, 0.7)
+	sep.custom_minimum_size = Vector2(640, 1)
+	v.add_child(sep)
+
+	# Corpo + atalhos lado a lado
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 20)
+	v.add_child(cols)
+
+	var body := _label(s[1], 15, Color(0.90, 1.0, 0.92))
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size.x = 440
+	cols.add_child(body)
+
+	var hint_bg := ColorRect.new()
+	hint_bg.color = Color(0.06, 0.10, 0.12, 0.80)
+	hint_bg.custom_minimum_size = Vector2(160, 0)
+	cols.add_child(hint_bg)
+	var hint_lbl := _label(s[2], 12, Color(0.65, 0.85, 0.75))
+	hint_lbl.position = Vector2(8, 8)
+	hint_bg.add_child(hint_lbl)
+
+	# Botão de avançar
 	var b := Button.new()
-	b.text = "PRÓXIMO" if tut_step < steps.size() - 1 else "ENTENDIDO — INICIAR"
+	b.text = "PRÓXIMO  ›" if tut_step < steps.size() - 1 else "ENTENDIDO — COMEÇAR"
+	b.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	b.pressed.connect(func():
 		Sfx.play("confirm")
 		tut_step += 1
@@ -1529,11 +1579,14 @@ func _tut_render() -> void:
 	_set_9slice_margins(sb_h, 4)
 	b.add_theme_stylebox_override("normal", sb_n)
 	b.add_theme_stylebox_override("hover", sb_h)
+	b.add_theme_font_size_override("font_size", 14)
 	b.add_theme_color_override("font_color", Color(0.85, 1.0, 0.9))
 	b.add_theme_color_override("font_hover_color", Color(1.0, 0.85, 0.35))
+	b.custom_minimum_size = Vector2(200, 36)
 	v.add_child(b)
+
 	tutorial_panel.add_child(pc)
-	create_tween().tween_property(pc, "modulate:a", 1.0, 0.3)
+	create_tween().tween_property(pc, "modulate:a", 1.0, 0.25)
 
 
 # ------------------------------------------------------------ api para o mundo
@@ -1624,18 +1677,20 @@ func set_hover(o, n) -> void:
 			memory_box.add_child(_label("(nenhuma)", 11, Color(0.5, 0.6, 0.55)))
 		else:
 			for m in mem.slice(maxi(mem.size() - 3, 0)):
-				var ml := _label("· " + str(m).substr(0, 50), 11, Color(0.75, 0.85, 0.8))
+				var ml := _label("· " + str(m).substr(0, 42), 10, Color(0.75, 0.85, 0.8))
 				ml.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-				ml.custom_minimum_size.x = 260
+				ml.custom_minimum_size.x = 218
 				memory_box.add_child(ml)
 		var content: Control = card.get_child(1)
-		card.size = Vector2(300, maxf(content.get_combined_minimum_size().y, 60.0))
+		card.size = Vector2(256, maxf(content.get_combined_minimum_size().y, 60.0))
 		card.position = Vector2(12, 720 - 64 - card.size.y)
 	else:
 		card.visible = false
 	if o:
 		tooltip.visible = true
-		tooltip_label.text = "%s  [%s]" % [o.def.name, ", ".join(o.display_tags())]
+		var tags := ", ".join(o.display_tags())
+		var hint := "Clique — pegar (1 PA)" if not world.held else "Clique — soltar aqui"
+		tooltip_label.text = "%s\n%s\n%s" % [o.def.name, tags, hint] if tags != "" else "%s\n%s" % [o.def.name, hint]
 		tooltip.position = get_viewport().get_mouse_position() + Vector2(14, -30)
 		var tc: Control = tooltip.get_child(1)
 		tooltip.size = tc.get_combined_minimum_size()
