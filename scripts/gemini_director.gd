@@ -317,7 +317,8 @@ func _on_timeout(request_id: int) -> void:
 	if not _busy or request_id != _request_id:
 		return
 	_http.cancel_request()
-	_fail("O Gemini excedeu 15 segundos de espera. Tente novamente.")
+	var t := BACKEND_TIMEOUT_SECONDS if _using_backend else TIMEOUT_SECONDS
+	_fail("O Gemini excedeu %d segundos de espera. Tente novamente." % int(t))
 
 
 func _finish_request() -> void:

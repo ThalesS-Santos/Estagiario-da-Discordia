@@ -23,6 +23,12 @@ desktop.ini
 .idea/
 
 
+# Pasta music/ duplicada (áudio real está em assets/audio/)
+/music/
+
+# Build output
+/build/
+
 # Backend (Cloudflare Workers)
 backend/node_modules/
 backend/.wrangler/
