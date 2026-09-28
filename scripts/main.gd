@@ -365,6 +365,7 @@ func show_loading() -> void:
 
 
 func show_menu() -> void:
+	Music.set_menu_active(true)
 	var s := _new_screen()
 	_menu_backdrop()
 	var vign := ColorRect.new()
@@ -513,6 +514,7 @@ func show_briefing() -> void:
 
 
 func start_game(new_game: bool) -> void:
+	Music.set_menu_active(false)
 	_new_screen()
 	_clear_menu_backdrop()
 	screen.queue_free()

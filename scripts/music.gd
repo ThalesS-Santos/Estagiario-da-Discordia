@@ -1,7 +1,7 @@
 extends Node
 ## Música ambiente persistente entre as telas do jogo.
 
-const MUSIC_PATH := "res://assets/audio/main_song.mp3"
+const MUSIC_PATH := "res://assets/audio/main_menu.mp3"
 
 var player: AudioStreamPlayer
 
@@ -22,6 +22,15 @@ func _ready() -> void:
 func set_volume(value: float) -> void:
 	if is_instance_valid(player):
 		player.volume_db = linear_to_db(maxf(value, 0.001))
+
+
+func set_menu_active(active: bool) -> void:
+	if not is_instance_valid(player):
+		return
+	if active and not player.playing:
+		player.play()
+	elif not active and player.playing:
+		player.stop()
 
 
 func _update_volume() -> void:
