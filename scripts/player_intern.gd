@@ -128,6 +128,7 @@ func _ready() -> void:
 func _setup_sheet() -> void:
 	sprite.texture = load(sheet_path)
 	sprite.hframes = 4
+	@warning_ignore("integer_division")
 	sprite.vframes = maxi(sprite.texture.get_height() / 24, 3) # 3 linhas em pé (+3 agachado, se a folha tiver)
 	_has_crouch_rows = sprite.vframes >= 6
 	sprite.centered = false

@@ -210,11 +210,11 @@ func walk_to(p: Vector2, run := false) -> void:
 func say(text: String, dur := 3.5) -> void:
 	bubble = text
 	bubble_t = dur
-	var t := text.left(AIContract.MAX_DIALOGUE)
-	bubble_label.text = t
+	var _t := text.left(AIContract.MAX_DIALOGUE)
+	bubble_label.text = _t
 	var char_w := 6.0
 	var pad := 16.0
-	var text_w := t.length() * char_w + pad
+	var text_w := _t.length() * char_w + pad
 	var w := clampf(text_w, 40.0, 170.0)
 	bubble_label.size = Vector2(w, 0)
 	bubble_label.custom_minimum_size = Vector2(w, 0)
@@ -467,26 +467,26 @@ func _physics_process(delta: float) -> void:
 
 
 ## Módulo 2: corpo entrou no cone de visão — verifica se é o jogador com item suspeito.
-func _on_vision_cone_body_entered(body: Node2D) -> void:
+func _on_vision_cone_body_entered(target_body: Node2D) -> void:
 	if fallen or pursuing or not _is_authority():
 		return
-	if not body.is_in_group("player"):
+	if not target_body.is_in_group("player"):
 		return
 	# Só dispara se o jogador carrega item suspeito e não está em furtividade.
-	var holding_sus: bool = body.has_method("is_holding_suspicious_item") and body.is_holding_suspicious_item()
-	var in_stealth: bool = body.has_method("is_in_stealth_state") and body.is_in_stealth_state()
+	var holding_sus: bool = target_body.has_method("is_holding_suspicious_item") and target_body.is_holding_suspicious_item()
+	var in_stealth: bool = target_body.has_method("is_in_stealth_state") and target_body.is_in_stealth_state()
 	if holding_sus and not in_stealth:
-		_trigger_vision_detection(body)
+		_trigger_vision_detection(target_body)
 
 
-func _trigger_vision_detection(target: Node2D) -> void:
+func _trigger_vision_detection(target_node: Node2D) -> void:
 	show_emote("!", 2.5)
 	say("Alto aí! O que você tem aí?!", 4.0)
 	Sfx.play("shout")
 	if world and world.has_method("_on_vision_cone_caught"):
-		world._on_vision_cone_caught(self, target)
+		world._on_vision_cone_caught(self, target_node)
 	else:
-		start_pursuit(target, 15.0)
+		start_pursuit(target_node, 15.0)
 
 
 ## Módulo 4: verifica NPCs próximos para o caos de empurrão quando instabilidade > 50%.

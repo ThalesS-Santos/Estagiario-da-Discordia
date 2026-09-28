@@ -3,6 +3,7 @@ extends Node2D
 
 signal victory
 signal defeat
+@warning_ignore("unused_signal")
 signal quit_to_menu
 
 enum Phase { ACTION, TERMINAL, SIM, ACTIVE_EVENT, PURSUIT, CONFRONTATION, ENDED }
@@ -1197,7 +1198,7 @@ func _try_resolve_active_event(action_id: String, target_npc: NPC = null) -> voi
 	resolve_current_event(true)
 
 
-func _did_action_succeed(action_id: String, target_npc: NPC) -> bool:
+func _did_action_succeed(action_id: String, _target_npc: NPC) -> bool:
 	match action_id:
 		"destroy_evidence", "ask_help", "incriminate":
 			# _apply_action_specific seta _last_action_effect antes de _try_resolve rodar

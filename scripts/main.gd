@@ -334,7 +334,7 @@ class RegistroScreen extends Control:
 		_hint.visible = true
 		_status.visible = true
 		_scan.visible = true
-		var x0 := I_PANEL.position.x * PX
+		var _x0 := I_PANEL.position.x * PX
 		var y0 := I_PANEL.position.y * PX
 		var h := I_PANEL.size.y * PX
 		var stw := create_tween().set_loops()
@@ -1060,7 +1060,7 @@ func show_victory() -> void:
 	s.add_child(line_top)
 
 	var title := _lbl(s, "O  P A R A D O X O  D O  E S T A G I Á R I O", 32, y, Vector2(0, 190), 1280.0)
-	var sub := _lbl(s, "Missão Concluída", 18, white, Vector2(0, 240), 1280.0)
+	var _sub := _lbl(s, "Missão Concluída", 18, white, Vector2(0, 240), 1280.0)
 
 	# Linha decorativa inferior
 	var line_bot := ColorRect.new()
@@ -1071,7 +1071,7 @@ func show_victory() -> void:
 	s.add_child(line_bot)
 
 	# Subtítulo temático
-	var theme_lbl := _lbl(s, "\"O Efeito Borboleta foi implantado com sucesso.\"", 13, Color(0.5, 1.0, 0.95, 0.5), Vector2(0, 290), 1280.0)
+	var _theme_lbl := _lbl(s, "\"O Efeito Borboleta foi implantado com sucesso.\"", 13, Color(0.5, 1.0, 0.95, 0.5), Vector2(0, 290), 1280.0)
 
 	if not await _wait(2.0):
 		return

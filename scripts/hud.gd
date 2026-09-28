@@ -554,6 +554,7 @@ func _build_action_menu() -> void:
 	action_panel.add_child(action_title)
 	for index in 8:
 		var btn := Button.new()
+		@warning_ignore("integer_division")
 		btn.position = Vector2(14 + (index % 2) * 140, 46 + (index / 2) * 70)
 		btn.size = Vector2(132, 58)
 		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1445,10 +1446,10 @@ func _build_status() -> void:
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	status_panel.add_child(dim)
 	# centered card
-	var card := _9patch(tex_panel, [4, 4, 4, 4], Vector2(720, 520))
-	card.position = Vector2(280, 60)
-	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	status_panel.add_child(card)
+	var _card := _9patch(tex_panel, [4, 4, 4, 4], Vector2(720, 520))
+	_card.position = Vector2(280, 60)
+	_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status_panel.add_child(_card)
 	# scroll inside card
 	status_scroll = ScrollContainer.new()
 	status_scroll.position = Vector2(12, 10)

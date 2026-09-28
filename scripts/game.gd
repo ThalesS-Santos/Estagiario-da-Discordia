@@ -721,7 +721,7 @@ const CONFRONTATION_CHOICES := {
 }
 
 
-func get_available_confrontation_choices(npc_id: String, has_valuable: bool) -> Array:
+func get_available_confrontation_choices(_npc_id: String, has_valuable: bool) -> Array:
 	var result: Array = []
 	for cid in CONFRONTATION_CHOICES:
 		var choice: Dictionary = CONFRONTATION_CHOICES[cid]
