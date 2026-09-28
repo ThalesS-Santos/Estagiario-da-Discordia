@@ -169,7 +169,7 @@ func _build_pages() -> Array[Dictionary]:
 		{"title": "CONEXÃO", "text":
 			"%s> CANAL SEGURO ABERTO.%s\n\nOperador %s, aqui é a Central Panóptico.\nPrimeiro dia de estágio... e você já vai a campo.\n\nDestino: a vila do %sRei Aldemar I%s.\nLinha temporal Alfa-3, coordenada 14.7-F." % [c, e, nm, y, e]},
 		{"title": "O PROBLEMA", "text":
-			"Nossas projeções não deixam dúvida:\nem 30 dias Aldemar declara guerra aos reinos vizinhos.\n\n%sA região inteira será destruída.%s\n\nVocê vai mudar esse futuro. Tem %s3 dias%s no local." % [r, e, y, e]},
+			"Nossas projeções não deixam dúvida:\nem 3 dias Aldemar declara guerra aos reinos vizinhos.\n\n%sA região inteira será destruída.%s\n\nVocê vai mudar esse futuro. Tem %s3 dias%s no local." % [r, e, y, e]},
 		{"title": "AS REGRAS", "text":
 			"Tire o rei do trono %ssem violência%s e sem se revelar.\nVocê não luta: você %smove objetos%s e %splanta boatos%s.\n\nCada boato mexe com o medo, a raiva e a lealdade dos moradores.\nQuando a %sInstabilidade Social%s chegar a 100%%,\no próprio povo derruba o rei." % [r, e, c, e, c, e, c, e]},
 		{"title": "PRIMEIRO PASSO", "text":

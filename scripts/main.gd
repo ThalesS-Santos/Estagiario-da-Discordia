@@ -214,6 +214,316 @@ class MenuBtn extends Button:
 			draw_line(Vector2(8 + arrow_x, cy), Vector2(4 + arrow_x, cy + 4), ac, 2.0)
 
 
+class RegistroScreen extends Control:
+	signal done
+
+	const I_DIR := "res://assets/gen/intro/"
+	const PX := 4.0
+	const I_PANEL := Rect2(36, 6, 248, 94)
+	const CYAN := Color("7ff6ff")
+
+	enum St { BOOT, INPUT, CLOSING, DONE }
+	var _st := St.BOOT
+	var _t := 0.0
+	var _bay_frame := 0
+	var _nudge := 0.0
+
+	var _bg_rect: ColorRect
+	var _bay: TextureRect
+	var _beam: TextureRect
+	var _holo: Control
+	var _arm_root: Control
+	var _scr: TextureRect
+	var _hand: TextureRect
+	var _fade: ColorRect
+	var _htw: Tween
+	var _le: LineEdit
+	var _hdr: Label
+	var _prompt_lbl: Label
+	var _hint: Label
+	var _status: Label
+	var _scan: ColorRect
+
+	func _ready() -> void:
+		set_anchors_preset(PRESET_FULL_RECT)
+		mouse_filter = MOUSE_FILTER_STOP
+		_mk_space_bg()
+		_bay = _lay(_atl("bay.png", 0), self)
+		_bay.modulate = Color(1, 1, 1, 0.45)
+		_beam = _lay(_atl("holo_beam.png", 0), self)
+		_beam.modulate.a = 0.0
+		_build_holo()
+		_arm_root = Control.new()
+		_arm_root.mouse_filter = MOUSE_FILTER_IGNORE
+		add_child(_arm_root)
+		_lay(load(I_DIR + "arm_left.png"), _arm_root)
+		_scr = _lay(_atl("device_screen.png", 0), _arm_root)
+		_hand = _lay(load(I_DIR + "hand_right.png"), self)
+		_hand.position = _hrest()
+		_fade = ColorRect.new()
+		_fade.color = Color.WHITE
+		_fade.set_anchors_preset(PRESET_FULL_RECT)
+		_fade.mouse_filter = MOUSE_FILTER_IGNORE
+		add_child(_fade)
+		_boot()
+
+	func _mk_space_bg() -> void:
+		_bg_rect = ColorRect.new()
+		_bg_rect.set_anchors_preset(PRESET_FULL_RECT)
+		_bg_rect.mouse_filter = MOUSE_FILTER_IGNORE
+		var sh := Shader.new()
+		sh.code = "shader_type canvas_item;\nuniform float time;\nfloat hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}\nvoid fragment(){\n\tvec2 uv=UV;vec3 c=vec3(0.012,0.016,0.035);\n\tc+=vec3(0.04,0.015,0.06)*smoothstep(0.55,0.0,length(uv-vec2(0.15,0.25)));\n\tc+=vec3(0.01,0.035,0.06)*smoothstep(0.5,0.0,length(uv-vec2(0.85,0.15)));\n\tc+=vec3(0.02,0.01,0.04)*smoothstep(0.6,0.0,length(uv-vec2(0.5,0.75)));\n\tfor(float s=50.0;s<=90.0;s+=40.0){\n\t\tvec2 g=floor(uv*s);float h=hash(g);\n\t\tif(h>0.92){\n\t\t\tvec2 ct=(g+0.5)/s;float d=length(uv-ct)*s;\n\t\t\tfloat b=smoothstep(0.5,0.0,d)*(0.4+0.6*max(sin(time*(0.8+h*2.5)+h*6.28),0.0));\n\t\t\tc+=b*mix(vec3(0.7,0.8,1.0),vec3(0.5,1.0,0.95),h);\n\t\t}\n\t}\n\tfloat period=3.5;float tt=mod(time,period)/period;float seed=floor(time/period);\n\tvec2 st=vec2(hash(vec2(seed,0.0)),hash(vec2(seed,1.0))*0.4);\n\tvec2 vel=vec2(0.25+hash(vec2(seed,2.0))*0.15,0.07);\n\tvec2 pos=st+vel*tt;vec2 dir=normalize(vel);vec2 dp=uv-pos;\n\tfloat behind=-dot(dp,dir);float cl=clamp(behind,0.0,0.04);\n\tfloat dist=length(dp+dir*cl);\n\tfloat b2=smoothstep(0.003,0.0,dist)*(1.0-cl/0.04);\n\tc+=vec3(0.9,0.95,1.0)*b2*(1.0-smoothstep(0.0,0.7,tt))*step(tt,0.7);\n\tCOLOR=vec4(c,1.0);\n}"
+		var mat := ShaderMaterial.new()
+		mat.shader = sh
+		_bg_rect.material = mat
+		add_child(_bg_rect)
+
+	func _boot() -> void:
+		_arm_root.position.y = 720.0
+		var tw := create_tween()
+		tw.tween_property(_fade, "color:a", 0.0, 0.8)
+		await tw.finished
+		if _st != St.BOOT:
+			return
+		Sfx.play("whoosh")
+		tw = create_tween()
+		tw.tween_property(_arm_root, "position:y", 0.0, 0.75).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		await tw.finished
+		if _st != St.BOOT:
+			return
+		_tap()
+		await get_tree().create_timer(0.12).timeout
+		if _st != St.BOOT:
+			return
+		Sfx.play("bip")
+		for i in 6:
+			_sscr(1 if i % 2 == 0 else 0)
+			await get_tree().create_timer(0.06).timeout
+		if _st != St.BOOT:
+			return
+		_sscr(2)
+		Sfx.play("portal_open")
+		tw = create_tween()
+		tw.tween_property(_beam, "modulate:a", 1.0, 0.18)
+		tw.tween_property(_holo, "scale:y", 1.0, 0.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.parallel().tween_property(_holo, "modulate:a", 1.0, 0.2)
+		await tw.finished
+		if _st != St.BOOT:
+			return
+		_hdr.visible_characters = 0
+		tw = create_tween()
+		tw.tween_method(func(v):
+			if is_instance_valid(_hdr):
+				_hdr.visible_characters = int(v), 0.0, float(_hdr.text.length()), 0.5)
+		await tw.finished
+		if _st != St.BOOT:
+			return
+		_hdr.visible_characters = -1
+		_prompt_lbl.visible_characters = 0
+		tw = create_tween()
+		tw.tween_method(func(v):
+			if is_instance_valid(_prompt_lbl):
+				_prompt_lbl.visible_characters = int(v), 0.0, float(_prompt_lbl.text.length()), 0.45)
+		await tw.finished
+		if _st != St.BOOT:
+			return
+		_prompt_lbl.visible_characters = -1
+		_st = St.INPUT
+		_le.visible = true
+		_le.call_deferred("grab_focus")
+		_hint.visible = true
+		_status.visible = true
+		_scan.visible = true
+		var x0 := I_PANEL.position.x * PX
+		var y0 := I_PANEL.position.y * PX
+		var h := I_PANEL.size.y * PX
+		var stw := create_tween().set_loops()
+		stw.tween_property(_scan, "position:y", y0 + h - 50.0, 2.5)
+		stw.tween_property(_scan, "position:y", y0 + 60.0, 2.5)
+
+	func _process(delta: float) -> void:
+		_t += delta
+		if is_instance_valid(_bg_rect) and _bg_rect.material:
+			(_bg_rect.material as ShaderMaterial).set_shader_parameter("time", _t)
+		if is_instance_valid(_bay):
+			var bf := int(_t * 7.0) % 4
+			if bf != _bay_frame:
+				_bay_frame = bf
+				(_bay.texture as AtlasTexture).region.position.x = bf * 320
+		if is_instance_valid(_beam) and _beam.modulate.a > 0:
+			(_beam.texture as AtlasTexture).region.position.x = (int(_t * 11.0) % 3) * 320
+		_nudge = move_toward(_nudge, 0.0, delta * 30.0)
+		if _st == St.INPUT and is_instance_valid(_arm_root):
+			_arm_root.position.y = (roundf(sin(_t * 1.7)) + roundf(_nudge)) * PX
+			if is_instance_valid(_holo):
+				_holo.modulate.a = 0.92 + 0.08 * sin(_t * 23.0) * sin(_t * 3.1)
+			_sscr(2 + (int(_t * 8.0) % 2))
+
+	func _input(event: InputEvent) -> void:
+		if _st == St.DONE or _st == St.CLOSING:
+			return
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			get_viewport().set_input_as_handled()
+			_do_submit("")
+
+	func _do_submit(text: String) -> void:
+		if _st == St.CLOSING or _st == St.DONE:
+			return
+		_st = St.CLOSING
+		var nm := text.strip_edges()
+		if nm == "":
+			nm = "ESTAGIARIO"
+		Game.player_name = nm.to_upper()
+		Sfx.play("confirm")
+		if is_instance_valid(_le):
+			_le.editable = false
+		_prompt_lbl.text = "ID registrado. Bem-vindo, %s." % Game.player_name
+		_prompt_lbl.visible_characters = -1
+		_hint.text = "Preparando portal dimensional..."
+		await get_tree().create_timer(1.8).timeout
+		if _st != St.CLOSING:
+			return
+		Sfx.play("whoosh")
+		var tw := create_tween()
+		tw.tween_property(_holo, "scale:y", 0.0, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		tw.tween_property(_beam, "modulate:a", 0.0, 0.12)
+		tw.tween_callback(func(): _sscr(0))
+		tw.tween_property(_arm_root, "position:y", 720.0, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		tw.tween_callback(func(): Sfx.play("whoosh"))
+		tw.tween_property(_bay, "modulate", Color(2, 2.5, 2.8, 0.6), 0.35)
+		tw.parallel().tween_property(_fade, "color", Color(1, 1, 1, 1), 0.35)
+		await tw.finished
+		_st = St.DONE
+		done.emit()
+
+	func _build_holo() -> void:
+		_holo = Control.new()
+		_holo.size = Vector2(1280, 720)
+		_holo.pivot_offset = Vector2(640, I_PANEL.end.y * PX)
+		_holo.scale.y = 0.0
+		_holo.modulate.a = 0.0
+		_holo.mouse_filter = MOUSE_FILTER_PASS
+		add_child(_holo)
+		_lay(load(I_DIR + "holo_panel.png"), _holo)
+		var font: Font = Game.ui_theme.default_font if Game.ui_theme else null
+		var x0 := I_PANEL.position.x * PX
+		var y0 := I_PANEL.position.y * PX
+		var w := I_PANEL.size.x * PX
+		var h := I_PANEL.size.y * PX
+		_hdr = _mlbl(font, 15, CYAN)
+		_hdr.text = "PANÓPTICO // SISTEMA DE REGISTRO"
+		_hdr.position = Vector2(x0 + 60, y0 + 14)
+		_holo.add_child(_hdr)
+		_prompt_lbl = _mlbl(font, 20, Color("d8fbff"))
+		_prompt_lbl.text = "Insira seu ID de Operador:"
+		_prompt_lbl.position = Vector2(x0 + 44, y0 + 110)
+		_prompt_lbl.size = Vector2(w - 88, 40)
+		_prompt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_holo.add_child(_prompt_lbl)
+		_le = LineEdit.new()
+		_le.position = Vector2(x0 + w / 2.0 - 220, y0 + 185)
+		_le.size = Vector2(440, 50)
+		_le.max_length = 12
+		_le.placeholder_text = "> _"
+		_le.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_le.visible = false
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.015, 0.06, 0.08, 0.85)
+		sb.border_color = Color(0.5, 0.96, 1.0, 0.6)
+		sb.set_border_width_all(2)
+		sb.set_corner_radius_all(3)
+		sb.content_margin_left = 12
+		sb.content_margin_right = 12
+		sb.content_margin_top = 8
+		sb.content_margin_bottom = 8
+		_le.add_theme_stylebox_override("normal", sb)
+		var sbf := StyleBoxFlat.new()
+		sbf.bg_color = Color(0.02, 0.08, 0.12, 0.9)
+		sbf.border_color = CYAN
+		sbf.set_border_width_all(2)
+		sbf.set_corner_radius_all(3)
+		sbf.content_margin_left = 12
+		sbf.content_margin_right = 12
+		sbf.content_margin_top = 8
+		sbf.content_margin_bottom = 8
+		_le.add_theme_stylebox_override("focus", sbf)
+		if font:
+			_le.add_theme_font_override("font", font)
+		_le.add_theme_font_size_override("font_size", 22)
+		_le.add_theme_color_override("font_color", Color("d8fbff"))
+		_le.add_theme_color_override("font_placeholder_color", Color(0.4, 0.7, 0.65, 0.4))
+		_le.add_theme_color_override("caret_color", CYAN)
+		_le.text_changed.connect(func(_txt): Sfx.play("clack"); _tap())
+		_le.text_submitted.connect(_do_submit)
+		_holo.add_child(_le)
+		_hint = _mlbl(font, 13, Color(0.5, 0.85, 0.9, 0.5))
+		_hint.text = "ENTER ▸ confirmar   |   vazio = ESTAGIÁRIO"
+		_hint.position = Vector2(x0 + 44, y0 + h - 56)
+		_hint.size = Vector2(w - 88, 24)
+		_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_hint.visible = false
+		_holo.add_child(_hint)
+		_status = _mlbl(font, 11, Color(0.4, 0.7, 0.6, 0.5))
+		_status.text = "◉ CANAL SEGURO  |  DIMENSÃO α-3  |  COORD 14.7-F"
+		_status.position = Vector2(x0 + 44, y0 + h - 32)
+		_status.size = Vector2(w - 88, 20)
+		_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_status.visible = false
+		_holo.add_child(_status)
+		_scan = ColorRect.new()
+		_scan.size = Vector2(w - 20, 2)
+		_scan.position = Vector2(x0 + 10, y0 + 60)
+		_scan.color = Color(0.5, 1.0, 0.95, 0.12)
+		_scan.mouse_filter = MOUSE_FILTER_IGNORE
+		_scan.visible = false
+		_holo.add_child(_scan)
+
+	func _tap() -> void:
+		if _htw:
+			_htw.kill()
+		_hand.position = _hrest()
+		_htw = create_tween()
+		_htw.tween_property(_hand, "position", Vector2.ZERO, 0.08).set_ease(Tween.EASE_OUT)
+		_htw.tween_callback(func():
+			_sscr(3)
+			_nudge = 2.0)
+		_htw.tween_interval(0.05)
+		_htw.tween_property(_hand, "position", _hrest(), 0.16).set_ease(Tween.EASE_IN)
+
+	func _hrest() -> Vector2:
+		return Vector2(80, 80) * PX
+
+	func _sscr(f: int) -> void:
+		(_scr.texture as AtlasTexture).region.position.x = f * 320
+
+	func _atl(file: String, f: int) -> AtlasTexture:
+		var a := AtlasTexture.new()
+		a.atlas = load(I_DIR + file)
+		a.region = Rect2(f * 320, 0, 320, 180)
+		return a
+
+	func _lay(tex: Texture2D, parent: Node) -> TextureRect:
+		var t := TextureRect.new()
+		t.texture = tex
+		t.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		t.size = Vector2(320, 180)
+		t.scale = Vector2(PX, PX)
+		t.mouse_filter = MOUSE_FILTER_IGNORE
+		parent.add_child(t)
+		return t
+
+	func _mlbl(font: Font, sz: int, col: Color) -> Label:
+		var l := Label.new()
+		if font:
+			l.add_theme_font_override("font", font)
+		l.add_theme_font_size_override("font_size", sz)
+		l.add_theme_color_override("font_color", col)
+		l.add_theme_color_override("font_outline_color", Color(0.17, 0.9, 0.96, 0.22))
+		l.add_theme_constant_override("outline_size", 3)
+		l.mouse_filter = MOUSE_FILTER_IGNORE
+		return l
+
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	Game.load_settings()
@@ -441,30 +751,14 @@ func show_menu() -> void:
 
 func show_name_entry() -> void:
 	var s := _new_screen()
-	_bg(s, Color(0.02, 0.03, 0.05))
-	var l := _lbl(s, "", 20, Color(0.6, 1.0, 0.75), Vector2(300, 240), 700.0, false)
-	_type(l, "AGÊNCIA PANÓPTICO // SISTEMA DE REGISTRO\nInsira seu ID de Operador:")
-	var le := LineEdit.new()
-	le.position = Vector2(300, 340)
-	le.size = Vector2(400, 40)
-	le.max_length = 12
-	le.placeholder_text = "> _"
-	le.text_changed.connect(func(_t): Sfx.play("clack"))
-	s.add_child(le)
-	le.call_deferred("grab_focus")
-	le.text_submitted.connect(func(t: String):
-		var nm := t.strip_edges()
-		if nm == "":
-			nm = "ESTAGIARIO"
-		Game.player_name = nm.to_upper()
-		Sfx.play("confirm")
-		le.editable = false
-		l.text = "ID registrado. Bem-vindo, %s.\nPreparando portal dimensional..." % Game.player_name
-		l.visible_characters = -1
-		if await _wait(2.2):
-			_flash()
-			Game.reset()
-			start_game(true))
+	var reg := RegistroScreen.new()
+	s.add_child(reg)
+	var my := seq_id
+	await reg.done
+	if my == seq_id:
+		_flash()
+		Game.reset()
+		start_game(true)
 
 
 func start_game(new_game: bool) -> void:

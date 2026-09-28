@@ -33,8 +33,9 @@ var toast_label: Label
 var banner: Label
 var tooltip: NinePatchRect
 var tooltip_label: Label
-var status_panel: NinePatchRect
+var status_panel: Control
 var status_vbox: VBoxContainer
+var status_scroll: ScrollContainer
 var pause_panel: Control
 var tutorial_panel: Control
 var flash_rect: ColorRect
@@ -1273,20 +1274,33 @@ func _on_term_submit(t: String) -> void:
 
 # ------------------------------------------------------------ status (TAB) / pausa
 func _build_status() -> void:
-	status_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(600, 0))
-	status_panel.position = Vector2(340, 100)
+	status_panel = Control.new()
+	status_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	status_panel.visible = false
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_bottom", 12)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	status_panel.add_child(margin)
+	status_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	# dim overlay
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.65)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status_panel.add_child(dim)
+	# centered card
+	var card := _9patch(tex_panel, [4, 4, 4, 4], Vector2(720, 520))
+	card.position = Vector2(280, 60)
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status_panel.add_child(card)
+	# scroll inside card
+	status_scroll = ScrollContainer.new()
+	status_scroll.position = Vector2(12, 10)
+	status_scroll.size = Vector2(696, 500)
+	status_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	status_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	card.add_child(status_scroll)
 	status_vbox = VBoxContainer.new()
-	status_vbox.add_theme_constant_override("separation", 6)
+	status_vbox.add_theme_constant_override("separation", 4)
 	status_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_child(status_vbox)
+	status_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_scroll.add_child(status_vbox)
 	ui.add_child(status_panel)
 
 
@@ -1298,77 +1312,134 @@ func toggle_status() -> void:
 		create_tween().tween_property(status_panel, "modulate:a", 1.0, 0.2)
 
 
-func _refresh_status() -> void:
-	for c in status_vbox.get_children():
-		c.queue_free()
-	status_vbox.add_child(_label("STATUS DOS MORADORES", 18, Color(1.0, 0.85, 0.35)))
+func _status_sep() -> TextureRect:
 	var sep := TextureRect.new()
 	sep.texture = tex_separator
-	sep.custom_minimum_size = Vector2(560, 6)
+	sep.custom_minimum_size = Vector2(670, 6)
 	sep.stretch_mode = TextureRect.STRETCH_TILE
 	sep.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	status_vbox.add_child(sep)
-	# header
+	return sep
+
+
+func _status_section(title: String) -> void:
+	status_vbox.add_child(_status_sep())
+	var t := _label(title, 15, Color(1.0, 0.85, 0.35))
+	t.custom_minimum_size.y = 24
+	status_vbox.add_child(t)
+
+
+func _stat_row(npc_name: String, role: String, stats: Array, colors: Array) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.custom_minimum_size.y = 22
+	# stripe background
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.08, 0.1, 0.14, 0.5)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.show_behind_parent = true
+	row.add_child(bg)
+	# name + role
+	var name_col := VBoxContainer.new()
+	name_col.custom_minimum_size.x = 150
+	name_col.add_theme_constant_override("separation", -2)
+	name_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var nl := _label(npc_name, 13, Color(1.0, 0.95, 0.85))
+	name_col.add_child(nl)
+	if role != "":
+		var rl := _label(role, 10, Color(0.55, 0.7, 0.65))
+		name_col.add_child(rl)
+	row.add_child(name_col)
+	# stat bars
+	for si in stats.size():
+		var sb := StatusStatBar.new()
+		sb.stat_color = colors[si]
+		sb.value = float(stats[si])
+		sb.custom_minimum_size = Vector2(110, 18)
+		row.add_child(sb)
+	status_vbox.add_child(row)
+
+
+func _refresh_status() -> void:
+	for c in status_vbox.get_children():
+		c.queue_free()
+	# title
+	var title_row := HBoxContainer.new()
+	title_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var title_l := _label("STATUS DOS MORADORES", 18, Color(1.0, 0.85, 0.35))
+	title_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_child(title_l)
+	var day_l := _label("Dia %d / %d" % [Game.current_day + 1, Game.MAX_DAYS], 13, Color(0.6, 0.85, 0.75))
+	title_row.add_child(day_l)
+	status_vbox.add_child(title_row)
+	# column headers
 	var hdr := HBoxContainer.new()
-	hdr.add_theme_constant_override("separation", 8)
+	hdr.add_theme_constant_override("separation", 6)
 	hdr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var col_name := _label("Nome", 13, Color(0.7, 0.85, 0.8))
-	col_name.custom_minimum_size.x = 140
-	hdr.add_child(col_name)
-	for sn in ["Medo", "Raiva", "Lealdade", "Cred."]:
-		var sl := _label(sn, 12, Color(0.6, 0.8, 0.7))
-		sl.custom_minimum_size.x = 80
+	var spacer := Control.new()
+	spacer.custom_minimum_size.x = 150
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hdr.add_child(spacer)
+	var stat_names := ["Medo", "Raiva", "Lealdade", "Cred."]
+	var stat_colors := [Color(0.42, 0.68, 0.92), Color(0.92, 0.38, 0.28), Color(0.95, 0.78, 0.28), Color(0.35, 0.72, 0.65)]
+	for si in 4:
+		var sl := _label(stat_names[si], 11, stat_colors[si].lightened(0.2))
+		sl.custom_minimum_size.x = 110
 		sl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		hdr.add_child(sl)
 	status_vbox.add_child(hdr)
-	# rows
+	# NPC rows
+	_status_section("FIGURAS PRINCIPAIS")
 	for id in Game.NPC_DEFS:
 		var st: Dictionary = Game.npc_state[id]
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 8)
-		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var nl := _label(Game.NPC_DEFS[id].name, 13, Color(0.9, 0.95, 1.0))
-		nl.custom_minimum_size.x = 140
-		row.add_child(nl)
-		var stats := [st.fear, st.anger, st.loyalty, st.cred]
-		var colors := [Color(0.42, 0.68, 0.92), Color(0.92, 0.38, 0.28), Color(0.95, 0.78, 0.28), Color(0.35, 0.72, 0.65)]
-		for si in 4:
-			var sb := StatusStatBar.new()
-			sb.stat_color = colors[si]
-			sb.value = float(stats[si])
-			sb.custom_minimum_size = Vector2(80, 16)
-			row.add_child(sb)
-		status_vbox.add_child(row)
-	# reputação
-	var sep2 := TextureRect.new()
-	sep2.texture = tex_separator
-	sep2.custom_minimum_size = Vector2(560, 6)
-	sep2.stretch_mode = TextureRect.STRETCH_TILE
-	sep2.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	sep2.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	status_vbox.add_child(sep2)
-	status_vbox.add_child(_label("REPUTAÇÃO", 16, Color(1.0, 0.85, 0.35)))
+		var def: Dictionary = Game.NPC_DEFS[id]
+		_stat_row(def.name, def.role, [st.fear, st.anger, st.loyalty, st.cred], stat_colors)
+	# Villager rows
+	if not Game.VILLAGER_DEFS.is_empty():
+		_status_section("ALDEÕES")
+		for id in Game.VILLAGER_DEFS:
+			if not Game.npc_state.has(id):
+				continue
+			var st: Dictionary = Game.npc_state[id]
+			var def: Dictionary = Game.VILLAGER_DEFS[id]
+			_stat_row(def.name, def.get("role", ""), [st.fear, st.anger, st.loyalty, st.cred], stat_colors)
+	# reputation
+	_status_section("REPUTAÇÃO")
 	for gid in Game.REPUTATION_GROUPS:
 		var gdef: Dictionary = Game.REPUTATION_GROUPS[gid]
 		var rep_val: float = Game.get_reputation(gid)
-		var rep_row := HBoxContainer.new()
-		rep_row.add_theme_constant_override("separation", 8)
-		rep_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var gname := _label(str(gdef.name), 13, Color(0.9, 0.95, 1.0))
-		gname.custom_minimum_size.x = 140
-		rep_row.add_child(gname)
-		var rep_col := Color(0.4, 0.85, 0.4) if rep_val > 10.0 else (Color(1.0, 0.4, 0.3) if rep_val < -10.0 else Color(0.7, 0.7, 0.7))
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.custom_minimum_size.y = 22
+		var bg := ColorRect.new()
+		bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		bg.color = Color(0.08, 0.1, 0.14, 0.5)
+		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bg.show_behind_parent = true
+		row.add_child(bg)
+		var gname := _label(str(gdef.name), 13, Color(1.0, 0.95, 0.85))
+		gname.custom_minimum_size.x = 150
+		row.add_child(gname)
+		var rep_col := Color(0.4, 0.85, 0.4) if rep_val > 10.0 else (Color(1.0, 0.4, 0.3) if rep_val < -10.0 else Color(0.65, 0.7, 0.65))
 		var rep_text := "%+d" % int(rep_val)
 		var rep_lbl := _label(rep_text, 14, rep_col)
-		rep_lbl.custom_minimum_size.x = 50
-		rep_row.add_child(rep_lbl)
+		rep_lbl.custom_minimum_size.x = 40
+		rep_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(rep_lbl)
 		var rep_bar := StatusStatBar.new()
 		rep_bar.stat_color = rep_col
 		rep_bar.value = (rep_val + 100.0) / 2.0
-		rep_bar.custom_minimum_size = Vector2(120, 14)
-		rep_row.add_child(rep_bar)
-		status_vbox.add_child(rep_row)
+		rep_bar.custom_minimum_size = Vector2(160, 16)
+		row.add_child(rep_bar)
+		status_vbox.add_child(row)
+	# hint
+	var hint := _label("TAB para fechar", 11, Color(0.5, 0.65, 0.6, 0.5))
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.custom_minimum_size = Vector2(670, 20)
+	status_vbox.add_child(hint)
 
 
 func _build_pause() -> void:
