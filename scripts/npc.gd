@@ -73,6 +73,18 @@ var _bubble_box: StyleBoxTexture
 var _tail: Texture2D
 var _emotes: Texture2D
 
+# Módulo 2: cone de visão (apenas NPCs de autoridade: guardas e rei)
+var vision_cone: Area2D = null
+var _vision_cone_polygon: CollisionPolygon2D = null
+
+# Módulo 4: estado de empurrão NPC vs NPC
+var _push_target: NPC = null      # NPC-alvo para colisão raivosa
+var _push_cooldown := 0.0
+
+
+func _is_authority() -> bool:
+	return id in ["npc_guard", "npc_guard2", "npc_king"]
+
 
 func setup(npc_id: String, d: Dictionary, w) -> void:
 	id = npc_id
@@ -93,8 +105,12 @@ func setup(npc_id: String, d: Dictionary, w) -> void:
 	target = home
 	t = randf() * 10.0
 	wander_t = randf_range(0.5, 4.0)
-	if id == "npc_guard":
-		patrol = [Game.loc_pos("castle_gate") + Vector2(0, 14), Game.loc_pos("fountain") + Vector2(-60, 50), Game.loc_pos("well") + Vector2(0, 34)]
+	if id == "npc_guard2":
+		# Renato patrulha a cidade toda; Bram fica fixo no portão (só se move por comando direto).
+		patrol = [Game.loc_pos("plaza"), Game.loc_pos("bakery") + Vector2(30, 10),
+			Game.loc_pos("forge") + Vector2(-30, 10), Game.loc_pos("temple") + Vector2(20, 10),
+			Game.loc_pos("stall") + Vector2(0, 20), Game.loc_pos("fountain") + Vector2(0, -20),
+			Game.loc_pos("notice_board") + Vector2(0, 20)]
 	_build_sprites()
 	collision_layer = 2
 	collision_mask = 1
@@ -107,6 +123,29 @@ func setup(npc_id: String, d: Dictionary, w) -> void:
 	navigation_agent.path_desired_distance = 4.0
 	navigation_agent.target_desired_distance = 6.0
 	add_child(navigation_agent)
+	if _is_authority():
+		_build_vision_cone()
+
+
+## Cria cone de visão triangular (~120 px) para NPCs de autoridade (guardas, rei).
+## O Area2D fica rotacionado no _physics_process para bater com facing_direction.
+func _build_vision_cone() -> void:
+	vision_cone = Area2D.new()
+	vision_cone.name = "VisionCone"
+	vision_cone.collision_layer = 0
+	vision_cone.collision_mask = 2  # camada do jogador
+	vision_cone.monitorable = false
+	var poly := CollisionPolygon2D.new()
+	# Triângulo: ponta na origem, abrindo ~60° para a direita (+X = frente padrão)
+	poly.polygon = PackedVector2Array([
+		Vector2(0, 0),
+		Vector2(120, -50),
+		Vector2(120, 50),
+	])
+	vision_cone.add_child(poly)
+	_vision_cone_polygon = poly
+	vision_cone.body_entered.connect(_on_vision_cone_body_entered)
+	add_child(vision_cone)
 
 
 func _build_sprites() -> void:
@@ -142,7 +181,7 @@ func _build_sprites() -> void:
 	bubble_label.add_theme_color_override("font_color", Color(0.16, 0.12, 0.2))
 	bubble_label.add_theme_font_size_override("font_size", 11)
 	bubble_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bubble_label.z_index = 11
+	bubble_label.z_index = 100
 	bubble_label.visible = false
 	add_child(bubble_label)
 
@@ -367,6 +406,21 @@ func _physics_process(delta: float) -> void:
 		return
 	if NavigationServer2D.map_get_iteration_id(navigation_agent.get_navigation_map()) == 0:
 		return
+	# Módulo 2: rodar o cone de visão para bater com a direção que o NPC está olhando.
+	if vision_cone != null:
+		var cone_angle: float
+		match dir:
+			0: cone_angle = PI / 2.0           # frente (para baixo em top-down)
+			1: cone_angle = -PI / 2.0          # costas (para cima)
+			2: cone_angle = 0.0 if facing > 0 else PI  # lateral
+			_: cone_angle = PI / 2.0
+		vision_cone.rotation = cone_angle
+	# Módulo 4: cooldown de empurrão e check de colisão raivosa NPC vs NPC
+	if _push_cooldown > 0.0:
+		_push_cooldown -= delta
+	if current_state == "ANGRY" and _push_target == null and world != null and \
+			Game.instability > 50.0 and not fallen:
+		_check_npc_push_range()
 	if pursuing:
 		_tick_pursuit(delta)
 	if moving and not fallen:
@@ -393,7 +447,7 @@ func _physics_process(delta: float) -> void:
 		wander_t -= delta
 		if wander_t <= 0.0:
 			wander_t = randf_range(3.0, 7.0)
-			if id == "npc_guard" and not patrol.is_empty():
+			if id == "npc_guard2" and not patrol.is_empty():
 				patrol_i = (patrol_i + 1) % patrol.size()
 				walk_to(patrol[patrol_i])
 			else:
@@ -403,6 +457,64 @@ func _physics_process(delta: float) -> void:
 	position = position.clamp(Vector2(10, 10), Game.MAP_SIZE - Vector2(10, 10))
 
 
+## Módulo 2: corpo entrou no cone de visão — verifica se é o jogador com item suspeito.
+func _on_vision_cone_body_entered(body: Node2D) -> void:
+	if fallen or pursuing or not _is_authority():
+		return
+	if not body.is_in_group("player"):
+		return
+	# Só dispara se o jogador carrega item suspeito e não está em furtividade.
+	var holding_sus: bool = body.has_method("is_holding_suspicious_item") and body.is_holding_suspicious_item()
+	var in_stealth: bool = body.has_method("is_in_stealth_state") and body.is_in_stealth_state()
+	if holding_sus and not in_stealth:
+		_trigger_vision_detection(body)
+
+
+func _trigger_vision_detection(target: Node2D) -> void:
+	show_emote("!", 2.5)
+	say("Alto aí! O que você tem aí?!", 4.0)
+	Sfx.play("shout")
+	if world and world.has_method("_on_vision_cone_caught"):
+		world._on_vision_cone_caught(self, target)
+	else:
+		start_pursuit(target, 15.0)
+
+
+## Módulo 4: verifica NPCs próximos para o caos de empurrão quando instabilidade > 50%.
+func _check_npc_push_range() -> void:
+	if _push_cooldown > 0.0:
+		return
+	if world == null:
+		return
+	var all_npcs: Array = world.npcs.values() if world.get("npcs") != null else []
+	for other: NPC in all_npcs:
+		if other == self or other.fallen or not is_instance_valid(other):
+			continue
+		var dist := global_position.distance_to(other.global_position)
+		if dist < 30.0:
+			_do_push(other)
+			break
+
+
+func _do_push(other: NPC) -> void:
+	_push_cooldown = 3.0
+	_push_target = other
+	# Animação de empurrão: o sprite dá um salto rápido na direção do alvo.
+	var push_dir := global_position.direction_to(other.global_position)
+	var push_tween := create_tween()
+	push_tween.tween_property(body, "position",
+		Vector2(push_dir.x * 6.0, push_dir.y * 6.0 - 4.0), 0.08).set_trans(Tween.TRANS_SINE)
+	push_tween.tween_property(body, "position", Vector2.ZERO, 0.12).set_trans(Tween.TRANS_BOUNCE)
+	push_tween.tween_callback(func(): _push_target = null)
+	# Partícula de fumaça/confusão entre os dois sprites.
+	if world and world.has_method("emit_particle"):
+		var midpoint := (global_position + other.global_position) / 2.0
+		world.emit_particle("smoke_thin", midpoint)
+		world.emit_particle("stars_dizzy", midpoint + Vector2(0, -8))
+	# O alvo tropeça um pouco.
+	other.hurt_mood(0.3, 0.1)
+
+
 func apply_ai_directive(directive: Dictionary) -> void:
 	if directive.get("npc_id") != id:
 		return
@@ -410,6 +522,9 @@ func apply_ai_directive(directive: Dictionary) -> void:
 	anger = int(directive.anger_level)
 	loyalty = int(directive.loyalty_level)
 	var state: String = directive.new_state
+	# Módulo 3: guarda com ANGRY vira perseguição imediata ao jogador.
+	if state == "ANGRY" and _is_authority():
+		state = "CHASE_PLAYER"
 	get_up()
 	moving = false
 	var destination: String = directive.target_node_to_move
@@ -425,6 +540,13 @@ func apply_ai_directive(directive: Dictionary) -> void:
 	current_state = state
 	if state == "FALLEN":
 		fall()
+	elif state == "CHASE_PLAYER":
+		# Módulo 3: inicia perseguição ao jogador com velocidade balanceada (130 px/s — 13% abaixo do jogador).
+		var player_node := get_tree().get_first_node_in_group("player") as Node2D
+		if player_node:
+			# pursue_speed_mult calibrado para atingir ~130 px/s: speed(120) * run_mult(1.6) * mult = 130
+			pursue_speed_mult = 130.0 / (speed * 1.6)
+			start_pursuit(player_node, 20.0)
 	hurt_mood(float(anger) / 100.0, float(fear) / 100.0)
 	if directive.dialogue_bubble != "":
 		say(directive.dialogue_bubble, 4.0)

@@ -386,6 +386,11 @@ CHARS = {
                      w=C["wood_d"], H=C["brown_d"]),
         ov=[(HELMET, "dus", 0), (GUARD_ARMS, "dus", 0), (SPEAR, "dus_under", 0)],
     ),
+    "npc_guard2": dict(
+        pal=base_pal(A=C["blue"], a=C["blue_d"], B=C["stone_l"], P=C["stone_dd"], p=C["out2"], F=C["out"],
+                     w=C["wood_d"], H=C["black"]),
+        ov=[(HELMET, "dus", 0), (GUARD_ARMS, "dus", 0), (SPEAR, "dus_under", 0)],
+    ),
     "npc_priestess": dict(
         pal=base_pal(H=C["wood_d"], h=C["out"], A=C["white"], a=C["grey_l"], B=C["gold"], F=C["gold_d"]),
         dress=True, ov=[(BUN, "dus", 0), (LONG_HAIR, "ds", 0), (PENDANT, "d", 0)],

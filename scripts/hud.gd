@@ -1110,8 +1110,8 @@ func _build_top_right() -> void:
 func _animate_instability(value: float) -> void:
 	if instability_tween:
 		instability_tween.kill()
-	instability_tween = create_tween()
-	instability_tween.tween_property(bar, "value", value, 1.5).set_trans(Tween.TRANS_SINE)
+	instability_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	instability_tween.tween_property(bar, "value", value, 1.0)
 
 
 func update_instability_bar(delta_amount: int) -> void:
@@ -1531,7 +1531,7 @@ func _refresh_status() -> void:
 	var title_l := _label("STATUS DOS MORADORES", 18, Color(1.0, 0.85, 0.35))
 	title_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_row.add_child(title_l)
-	var day_l := _label("Dia %d / %d" % [Game.current_day + 1, Game.MAX_DAYS], 13, Color(0.6, 0.85, 0.75))
+	var day_l := _label("Dia %d / %d" % [Game.day, Game.MAX_DAYS], 13, Color(0.6, 0.85, 0.75))
 	title_row.add_child(day_l)
 	status_vbox.add_child(title_row)
 	# column headers

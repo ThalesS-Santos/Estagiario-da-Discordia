@@ -28,6 +28,7 @@ var suspicion     := 0.0
 var gate_is_open  := false
 var gate_timer    := 0.0
 var gate_prompt_visible := false
+var revolt_mode   := false  # true quando a revolta (instabilidade 100%) abriu o portão — sem timer, sem Osric
 var catch_count   := 0
 var mission_ended := false
 var player_crossed := false
@@ -143,6 +144,10 @@ func tick(delta: float) -> void:
 
 
 func _tick_gate(delta: float) -> void:
+	if revolt_mode:
+		# A revolta já tirou Bram do portão de vez — o portão fica aberto até o jogador cruzar,
+		# sem timer e sem risco do guarda voltar.
+		return
 	if not is_instance_valid(_bram):
 		return
 	var dist: float = _bram.global_position.distance_to(GATE_POS)
@@ -163,6 +168,15 @@ func _tick_gate(delta: float) -> void:
 			_close_gate(true)
 
 
+## Chamado por world.gd quando a instabilidade chega a 100%: a revolta tira Bram do
+## portão para sempre. O portão abre e fica aberto até o jogador cruzar.
+func force_gate_open_from_revolt() -> void:
+	revolt_mode = true
+	Game.event_flags["gate_unguarded"] = true
+	if not gate_is_open:
+		_open_gate()
+
+
 func _open_gate() -> void:
 	gate_is_open = true
 	gate_timer   = GATE_OPEN_DUR
@@ -177,7 +191,7 @@ func _open_gate() -> void:
 
 
 func _close_gate(timed_out: bool) -> void:
-	if not gate_is_open:
+	if not gate_is_open or revolt_mode:
 		return
 	gate_is_open = false
 	Game.event_flags["gate_unguarded"] = false
@@ -197,6 +211,10 @@ func _close_gate(timed_out: bool) -> void:
 
 
 func _tick_osric_suspicion(delta: float) -> void:
+	if revolt_mode:
+		if _hud and _hud.has_method("set_suspicion_visible"):
+			_hud.set_suspicion_visible(false)
+		return
 	if not is_instance_valid(_osric) or not is_instance_valid(_player):
 		return
 

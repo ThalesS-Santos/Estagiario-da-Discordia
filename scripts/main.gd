@@ -842,59 +842,100 @@ func show_victory() -> void:
 	var s := _new_screen()
 	_bg(s, Color(1, 1, 1))
 	_flash(1.0)
-	Sfx.play("horn")
-	var l := _lbl(s, "", 22, Color(0.7, 1.0, 0.85), Vector2(190, 200), 900.0)
 	var bg := s.get_child(0) as ColorRect
-	create_tween().tween_property(bg, "color", Color.BLACK, 1.0)
-	if not await _wait(1.0):
-		return
-	_type(l, "\"Missão cumprida, Operador %s. Anomalia neutralizada. Parabéns. A linha do tempo foi... protegida.\"\n\n...Preparando seu próximo destino." % Game.player_name, 38.0)
-	if not await _wait(9.0):
-		return
-	l.text = ""
-	_type(l, "MISSÃO CONCLUÍDA\nO Rei foi deposto.\nEfeito Borboleta atingido.\nA linha do tempo está... protegida?", 30.0)
-	if not await _wait(6.0):
-		return
-	# --- plot twist
-	_flash(0.3)
-	l.add_theme_color_override("font_color", Color(1.0, 0.75, 0.45))
-	l.text = "[ESTÁTICA]  ...  [ERRO NO SISTEMA]"
-	l.visible_characters = -1
-	Sfx.play("error")
+	create_tween().tween_property(bg, "color", Color.BLACK, 1.5)
 	if not await _wait(2.0):
 		return
-	l.text = ""
-	_type(l, "\"Operador. Se você está ouvindo isto, chegou ao fim da primeira missão. Preciso que saiba a verdade sobre a Agência Panóptico.\n\nO Rei Aldemar I não era uma anomalia. Ele ia unificar estes reinos e iniciar a maior era de paz que este mundo conheceria. A Agência o eliminou. E você foi a ferramenta.\n\nA cientista da Fase 2 vai libertar a humanidade da tirania corporativa. A colônia em Marte, na Fase 3, é a primeira aliança pacífica entre espécies. Todas as suas missões são assassinatos. A Agência não protege a linha do tempo. Ela a controla.\"", 34.0)
-	if not await _wait(19.0):
+
+	# --- Silêncio pós-flash de memória, depois a mensagem final aparece ---
+	var y := Color(1.0, 0.85, 0.35)
+	var cyan := Color(0.5, 1.0, 0.95)
+	var red := Color(1.0, 0.5, 0.45)
+	var white := Color(0.85, 0.92, 0.88)
+
+	# Estática e glitch
+	var glitch := _lbl(s, "", 14, Color(0.2, 0.7, 0.4, 0.5), Vector2(40, 30), 1200.0, false)
+	var glitch_chars := "01ABCDEF{}[]<>=;:/#$%&*"
+	var my_seq := seq_id
+	# Glitch sutil nos cantos enquanto o texto principal rola
+	var _glitch_task := func():
+		while my_seq == seq_id:
+			var t := ""
+			for r in 3:
+				for i in 30:
+					t += glitch_chars[randi() % glitch_chars.length()]
+				t += "\n"
+			glitch.text = t
+			glitch.modulate.a = randf_range(0.05, 0.2)
+			await get_tree().create_timer(0.2).timeout
+	_glitch_task.call()
+
+	# Linha 1: estática
+	Sfx.play("bip")
+	var l := _lbl(s, "", 16, cyan, Vector2(190, 180), 900.0, false)
+	_type(l, "> [SISTEMA PANÓPTICO — ENCERRAMENTO DE MISSÃO]", 35.0)
+	if not await _wait(2.5):
 		return
-	_flash(0.3)
-	l.add_theme_color_override("font_color", Color(0.7, 1.0, 0.85))
-	l.text = ""
-	_type(l, "O Diretor: \"Conexão não autorizada encerrada. Operador, desconsidere os erros do sistema. Preparando próxima missão.\"", 40.0)
-	if not await _wait(5.0):
+
+	# Linha 2: mensagem que o jogador "deveria" ver (memória apagada)
+	var l2 := _lbl(s, "", 18, white, Vector2(190, 240), 900.0, false)
+	_type(l2, "Operador %s,\n\nVocê não se lembra do que aconteceu nos últimos minutos.\nIsso é normal. O protocolo de contenção foi ativado." % Game.player_name, 38.0)
+	if not await _wait(6.0):
 		return
-	# --- teaser
-	for card in ["Metrópole Global — 2142\nArranha-céus, chuva de código, uma cientista em laboratório holográfico.", "Colônia Ares-7 — 3050\nUm domo em Marte. Humanos e alienígenas na mesma sala de reunião.", "Sede da Agência Panóptico\nServidores infinitos, portais dimensionais, o ícone do Diretor pulsando."]:
-		_flash(0.25)
-		l.text = card
-		l.visible_characters = -1
-		Sfx.play("whoosh")
-		if not await _wait(3.4):
-			return
-	_flash(0.3)
-	l.add_theme_font_size_override("font_size", 34)
-	l.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
-	l.text = "O efeito borboleta não acabou."
+
+	# Linha 3: a verdade sutil
+	var l3 := _lbl(s, "", 16, red, Vector2(190, 370), 900.0, false)
+	Sfx.play("error")
+	_flash(0.15)
+	_type(l3, "[FRAGMENTO DE MEMÓRIA NÃO APAGADO]", 25.0)
+	if not await _wait(2.5):
+		return
+
+	var l4 := _lbl(s, "", 17, Color(1.0, 0.75, 0.45), Vector2(190, 410), 900.0, false)
+	_type(l4, "\"...a Agência está tirando o livre-arbítrio...\"", 30.0)
 	if not await _wait(3.5):
 		return
+
+	# Flash final + mensagem do tema da jam
+	_flash(0.3)
 	l.visible = false
+	l2.visible = false
+	l3.visible = false
+	l4.visible = false
+	if not await _wait(1.0):
+		return
+
+	var final_msg := _lbl(s, "", 28, y, Vector2(140, 200), 1000.0)
+	_type(final_msg, "A linha do tempo não está segura...", 20.0)
+	if not await _wait(3.5):
+		return
+	var final_msg2 := _lbl(s, "", 22, cyan, Vector2(140, 300), 1000.0)
+	_type(final_msg2, "O Efeito Borboleta foi implantado com sucesso.", 22.0)
+	if not await _wait(4.0):
+		return
+	var final_msg3 := _lbl(s, "", 26, Color(1.0, 0.5, 0.3), Vector2(140, 380), 1000.0)
+	Sfx.play("tension")
+	_type(final_msg3, "Agora é com você... Estagiário.", 18.0)
+	if not await _wait(5.0):
+		return
+
+	# Botões
+	final_msg.visible = false
+	final_msg2.visible = false
+	final_msg3.visible = false
+	glitch.visible = false
+	_flash(0.3)
+
+	var title := _lbl(s, "O PARADOXO DO ESTAGIÁRIO", 36, y, Vector2(0, 200), 1280.0)
+	var sub := _lbl(s, "Missão Concluída", 20, white, Vector2(0, 260), 1280.0)
+	if not await _wait(2.0):
+		return
 	var box := VBoxContainer.new()
-	box.position = Vector2(480, 300)
+	box.position = Vector2(480, 360)
 	s.add_child(box)
-	var next := _btn(box, "[ PRÓXIMA MISSÃO (EM BREVE) ]", func(): pass)
-	next.disabled = true
-	_btn(box, "[ MENU PRINCIPAL ]", show_menu)
 	_btn(box, "[ JOGAR NOVAMENTE ]", func():
 		Game.reset()
 		_flash()
 		start_game(false))
+	_btn(box, "[ CRÉDITOS ]", show_credits)
+	_btn(box, "[ MENU PRINCIPAL ]", show_menu)

@@ -79,6 +79,8 @@ var NPC_DEFS := {
 		"color": Color(0.45, 0.28, 0.16), "skin": Color(0.78, 0.58, 0.44), "hat": "hair_dark", "size": Vector2(34, 46), "home": "forge"},
 	"npc_guard": {"name": "Bram", "role": "Guarda", "fear": 10, "anger": 30, "loyalty": 95, "cred": 35,
 		"color": Color(0.5, 0.36, 0.22), "skin": Color(0.85, 0.66, 0.5), "hat": "helm", "size": Vector2(32, 46), "home": "castle_gate"},
+	"npc_guard2": {"name": "Renato", "role": "Guarda-Patrulha", "fear": 15, "anger": 25, "loyalty": 80, "cred": 40,
+		"color": Color(0.23, 0.43, 0.77), "skin": Color(0.8, 0.6, 0.46), "hat": "helm", "size": Vector2(32, 46), "home": "plaza", "wide_wander": true},
 	"npc_priestess": {"name": "Mira", "role": "Sacerdotisa", "fear": 25, "anger": 10, "loyalty": 50, "cred": 55,
 		"color": Color(0.96, 0.96, 1.0), "skin": Color(0.92, 0.76, 0.62), "hat": "hair_bun", "size": Vector2(28, 48), "home": "temple"},
 	"npc_merchant": {"name": "Valdo", "role": "Mercador", "fear": 20, "anger": 15, "loyalty": 10, "cred": 80,
@@ -353,7 +355,7 @@ const REPUTATION_GROUPS := {
 	},
 	"guards": {
 		"name": "Guarda Real",
-		"members": ["npc_guard"],
+		"members": ["npc_guard", "npc_guard2"],
 	},
 	"clergy": {
 		"name": "Clero",

@@ -26,21 +26,21 @@ def _inner_corner_map():
 
 
 def cobble_tile(seed):
-    """Lajotas grandes (8x8) chanfradas, no tom claro da Kenney."""
+    """Paralelepípedos grandes (8x8), vistos de cima — achatado, sem bisel 3D
+    (o bisel forte fazia o chão parecer parede; agora é só uma linha fina de
+    argamassa entre as lajotas, com leve variação de tom)."""
     t = new(T, T, C["stone"])
     r = rng(seed)
     for (sx, sy) in ((0, 0), (8, 0), (0, 8), (8, 8)):
-        rect(t, sx, sy, 7, 7, C["stone_l"])
-        hline(t, sx, sx + 6, sy + 6, C["stone"])
-        vline(t, sx + 6, sy, sy + 6, C["stone"])
-        put(t, sx, sy, (222, 228, 238, 255))
+        base = C["stone_l"] if r.random() < 0.55 else C["stone"]
+        rect(t, sx, sy, 8, 8, base)
+        # linha de argamassa fina (só uma, sem realce duplo) embaixo e à direita
         hline(t, sx, sx + 7, sy + 7, C["stone_d"])
         vline(t, sx + 7, sy, sy + 7, C["stone_d"])
         k = r.random()
-        if k < 0.18:
-            put(t, sx + r.randrange(2, 5), sy + r.randrange(2, 5), C["stone"])
-            put(t, sx + r.randrange(2, 5), sy + r.randrange(2, 5), C["stone"])
-        elif k < 0.26:
+        if k < 0.16:
+            put(t, sx + r.randrange(2, 6), sy + r.randrange(2, 6), C["stone_d"])
+        elif k < 0.24:
             put(t, sx + 6, sy + 6, C["grass_d"])
             put(t, sx + 7, sy + 6, C["grass"])
     return t

@@ -543,6 +543,24 @@ func _try_start_gossip() -> void:
 	open_gossip_terminal.emit(best)
 
 
+## Módulo 2: retorna true se o jogador carrega um item considerado suspeito por guardas.
+func is_holding_suspicious_item() -> bool:
+	if held_object == null:
+		return false
+	# Item é suspeito se tiver tag "real", "arma", "missao" ou "proibido" na sua definição.
+	if held_object.has_method("get") and held_object.get("def") is Dictionary:
+		for tag: String in held_object.def.get("tags", []):
+			if tag in ["real", "arma", "missao", "proibido", "chave", "reliquia"]:
+				return true
+	# Fallback: qualquer item carregado é suspeito perto de autoridades.
+	return held_object != null
+
+
+## Módulo 2: retorna true se o jogador estiver em modo furtivo (agachado/stealth).
+func is_in_stealth_state() -> bool:
+	return state == State.STEALTH
+
+
 ## Chame quando o terminal de fofoca fechar para devolver o controle ao jogador.
 func end_interaction() -> void:
 	if state != State.INTERACT:

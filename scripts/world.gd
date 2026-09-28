@@ -61,6 +61,8 @@ var day_revision := 0
 var sim_running := false
 var _instability_added_today := 0.0  # Feature 2: trava diária de instabilidade
 var _panic_tick := 0.0               # Feature 3: ticker de pânico visual dos NPCs
+var _revolt_active := false          # true assim que a instabilidade chega a 100%
+var _revolt_fires: Array = []
 var snapshot := {}
 var rings: Array = []
 var _active_event_current: Dictionary = {}
@@ -601,9 +603,13 @@ func _start_day() -> void:
 	var diff: Dictionary = Game.get_difficulty()
 	var guard: NPC = npcs["npc_guard"]
 	guard.position = Game.loc_pos("castle_gate") + Vector2(0, 14)
-	if diff.patrol_enabled:
-		guard.def["wide_wander"] = true
-		guard.ambient = true
+	# Bram fica sempre fixo no portão; só sai por comando direto da missão ou da revolta.
+	guard.ambient = false
+	guard.moving = false
+	var guard2: NPC = npcs.get("npc_guard2")
+	if guard2:
+		guard2.position = Game.loc_pos("plaza") + Vector2(randf_range(-20, 20), randf_range(-10, 10))
+		guard2.ambient = true
 	for npc: NPC in villagers:
 		npc.fear = int(Game.npc_state[npc.id].fear)
 		npc.anger = int(Game.npc_state[npc.id].anger)
@@ -696,6 +702,10 @@ func restart_day() -> void:
 
 # ------------------------------------------------------------------ input
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F2 and OS.is_debug_build():
+			_debug_skip_to_conclusion()
+			return
 	if intro_active or phase == Phase.TERMINAL or phase == Phase.CONFRONTATION or phase == Phase.ENDED:
 		return
 	if event is InputEventMouseButton and event.pressed:
@@ -728,6 +738,16 @@ func _debug_autoplay() -> void:
 	held_from = held.position
 	_open_drop_terminal(Game.loc_pos("lake") + Vector2(0, -60))
 	terminal_submit("O Rei mandou envenenar a agua do lago")
+
+
+func _debug_skip_to_conclusion() -> void:
+	if phase == Phase.ENDED:
+		return
+	phase = Phase.ENDED
+	player.input_enabled = false
+	hud.set_ui_visible(false)
+	await _conclusion_sequence()
+	victory.emit()
 
 
 func _obj_at(p: Vector2) -> WorldObject:
@@ -998,13 +1018,14 @@ func _finish_sim() -> void:
 		return
 	sim_running = false
 	_evaluate_chain_events()
-	# Vitória por revolta: instabilidade só conta se o rei foi deposto pela cadeia de eventos.
-	# Instabilidade alta sem king_deposed é pressão acumulada, não vitória.
-	var king_deposed := Game.get_event_state("king_deposed") == Game.EventState.RESOLVED
-	if Game.instability >= 100.0 and king_deposed:
-		phase = Phase.ENDED
-		await _victory_sequence()
-		victory.emit()
+	# A instabilidade chegar a 100% JÁ é a vitória (GDD): dispara a revolta imediatamente,
+	# sem depender da cadeia de eventos "king_deposed" ter sido resolvida por evidências.
+	if Game.instability >= 100.0 and not _revolt_active:
+		_start_revolt()
+	if _revolt_active:
+		# O dia normal acaba: não há mais avanço de dia nem derrota por tempo — o jogo
+		# agora é sobre chegar ao portão e abri-lo.
+		_resume_action_phase()
 	elif _ending_day:
 		phase = Phase.ENDED
 		if Game.day >= Game.MAX_DAYS:
@@ -1028,6 +1049,8 @@ func _resume_action_phase() -> void:
 	hud.set_active_event_mode(false)
 	hud.hide_active_event()
 	for npc: NPC in _ai_actors().values():
+		if npc.id == "npc_guard":
+			continue  # Bram fica fixo no portão; nunca volta a vagar sozinho
 		npc.ambient = true
 	player.input_enabled = true
 	if Game.ap == 0:
@@ -1048,6 +1071,8 @@ func _begin_next_active_event() -> void:
 	phase = Phase.ACTIVE_EVENT
 	player.input_enabled = true
 	for npc: NPC in _ai_actors().values():
+		if npc.id == "npc_guard":
+			continue  # Bram fica fixo no portão; nunca volta a vagar sozinho
 		npc.ambient = true
 	hud.set_active_event_mode(true)
 	hud.show_active_event(_active_event_current)
@@ -1370,6 +1395,76 @@ func _give_weapon(npc: NPC) -> void:
 	npc.add_child(spr)
 
 
+func _has_weapon(npc: NPC) -> bool:
+	for child in npc.get_children():
+		if child is Sprite2D and child.texture is AtlasTexture and child.texture.atlas == WEAPONS_TEX:
+			return true
+	return false
+
+
+## Disparado assim que a instabilidade chega a 100%: começa a revolta imediatamente,
+## sem esperar o jogador terminar o dia. Bram some do portão e o portão fica aberto
+## até o jogador chegar lá e apertar E — o resto da cena acontece em _victory_sequence().
+func _start_revolt() -> void:
+	if _revolt_active:
+		return
+	_revolt_active = true
+	crisis = true
+	hud.toast("A INSTABILIDADE CHEGOU AO LIMITE! O povo pega em armas!", 5.0)
+	Sfx.play("alarm")
+	clock = 21.0
+	var tw := create_tween()
+	tw.tween_property(mod, "color", Color("1a1a2e"), 2.5)
+	for light in village.lights:
+		if light is PointLight2D:
+			create_tween().tween_property(light, "color", Color(1.0, 0.25, 0.08), 2.0)
+	await get_tree().create_timer(1.0).timeout
+
+	for pos in _FIRE_POSITIONS:
+		_revolt_fires.append(_spawn_fire(pos, FIRE_TEX, 16, 24))
+		emit_particle("fire_sparks", pos)
+	shake = 4.0
+	Sfx.play("tension")
+	await get_tree().create_timer(0.6).timeout
+
+	for id in npcs:
+		if id == "npc_king" or id == "npc_guard" or id == "npc_guard2":
+			continue
+		var n: NPC = npcs[id]
+		n.ambient = false
+		_give_weapon(n)
+		n.say(_REVOLT_SHOUTS[randi() % _REVOLT_SHOUTS.size()], 4.0)
+		n.show_emote("!", 3.0)
+		n.walk_to(Game.loc_pos("castle_gate") + Vector2(randf_range(-90, 90), randf_range(50, 90)), true)
+	for v: NPC in villagers:
+		v.ambient = false
+		_give_weapon(v)
+		v.say(_REVOLT_SHOUTS[randi() % _REVOLT_SHOUTS.size()], 3.0)
+		v.walk_to(Game.loc_pos("castle_gate") + Vector2(randf_range(-90, 90), randf_range(50, 90)), true)
+	Sfx.play("murmur")
+
+	# Bram entra em pânico e abandona o portão — a missão continua sendo tirá-lo de lá,
+	# só que agora é a própria revolta que o tira, não mais uma distração criada aos poucos.
+	var guard: NPC = npcs.get("npc_guard")
+	if guard and is_instance_valid(guard):
+		guard.say("A vila está em revolta! Não posso segurar sozinho!", 4.0)
+		guard.show_emote("!", 3.0)
+		guard.walk_to(Game.loc_pos("plaza"), true)
+	# Renato tenta ajudar Bram, mas os dois são dominados pela multidão — não impede o jogador.
+	var guard2: NPC = npcs.get("npc_guard2")
+	if guard2 and is_instance_valid(guard2):
+		guard2.ambient = false
+		guard2.say("Bram! Preciso de você no portão!", 3.5)
+		guard2.show_emote("!", 2.5)
+		guard2.walk_to(Game.loc_pos("plaza"), true)
+
+	if mission:
+		mission.force_gate_open_from_revolt()
+
+	await get_tree().create_timer(1.2).timeout
+	hud.toast("O portão está desguarnecido! Corra até lá e pressione E.", 5.0)
+
+
 func _victory_sequence() -> void:
 	crisis = true
 	hud.set_ui_visible(false)
@@ -1378,72 +1473,66 @@ func _victory_sequence() -> void:
 	cam_zoom = 1.0
 	player.input_enabled = false
 
-	# === FASE 1: Noite cai + alarme ===
-	Sfx.play("alarm")
-	clock = 21.0
-	var tw := create_tween()
-	tw.tween_property(mod, "color", Color("1a1a2e"), 2.0)
-	for light in village.lights:
-		if light is PointLight2D:
-			create_tween().tween_property(light, "color", Color(1.0, 0.25, 0.08), 1.5)
-	await get_tree().create_timer(2.0).timeout
+	if not _revolt_active:
+		# Jogador venceu pela cadeia de missão sem ter passado por 100% de instabilidade antes —
+		# toca aqui a abertura da revolta que normalmente já teria acontecido.
+		_revolt_active = true
+		Sfx.play("alarm")
+		clock = 21.0
+		var tw0 := create_tween()
+		tw0.tween_property(mod, "color", Color("1a1a2e"), 2.0)
+		for light in village.lights:
+			if light is PointLight2D:
+				create_tween().tween_property(light, "color", Color(1.0, 0.25, 0.08), 1.5)
+		await get_tree().create_timer(2.0).timeout
+		for pos in _FIRE_POSITIONS:
+			_revolt_fires.append(_spawn_fire(pos, FIRE_TEX, 16, 24))
+			emit_particle("fire_sparks", pos)
+			await get_tree().create_timer(0.3).timeout
+		Sfx.play("tension")
+		shake = 4.0
+		cam_target = Vector2(640, 450)
+		await get_tree().create_timer(1.0).timeout
 
-	# === FASE 2: Fogo nas casas ===
-	var fires: Array = []
-	for pos in _FIRE_POSITIONS:
-		fires.append(_spawn_fire(pos, FIRE_TEX, 16, 24))
-		emit_particle("fire_sparks", pos)
-		await get_tree().create_timer(0.3).timeout
-	Sfx.play("tension")
-	shake = 4.0
-	cam_target = Vector2(640, 450)
-	await get_tree().create_timer(1.5).timeout
-
-	# === FASE 3: NPCs pegam armas e gritam ===
+	# === Reúne a multidão armada (já pode estar armada, se a revolta já tinha começado) ===
 	var revolt_npcs: Array = []
-	var idx := 0
 	for id in npcs:
-		var n: NPC = npcs[id]
-		if id == "npc_king":
+		if id == "npc_king" or id == "npc_guard" or id == "npc_guard2":
 			continue
+		var n: NPC = npcs[id]
 		n.ambient = false
 		n.get_up()
 		n.visible = true
 		n.position = n.position if n.position.x > 0 else Vector2(640, 940)
-		_give_weapon(n)
+		if not _has_weapon(n):
+			_give_weapon(n)
 		revolt_npcs.append(n)
-		n.say(_REVOLT_SHOUTS[idx % _REVOLT_SHOUTS.size()], 4.0)
 		n.show_emote("!", 3.0)
-		emit_particle("crowd_murmur", n.position)
-		idx += 1
 	for v: NPC in villagers:
 		v.ambient = false
 		v.get_up()
 		v.visible = true
-		_give_weapon(v)
-		v.say(_REVOLT_SHOUTS[randi() % _REVOLT_SHOUTS.size()], 4.0)
-		v.show_emote("!", 2.5)
+		if not _has_weapon(v):
+			_give_weapon(v)
 		revolt_npcs.append(v)
 	Sfx.play("murmur")
-	await get_tree().create_timer(2.0).timeout
 
-	# === FASE 4: Todos marcham para o portão ===
+	# === Todos marcham para o portão ===
 	cam_target = Vector2(640, 300)
 	for i2 in revolt_npcs.size():
 		var n: NPC = revolt_npcs[i2]
 		var offset := Vector2(-100 + (i2 % 6) * 36, 60 + (i2 / 6) * 28)
 		n.walk_to(Game.loc_pos("castle_gate") + offset, true)
-	Sfx.play("murmur")
-	await get_tree().create_timer(4.5).timeout
+	await get_tree().create_timer(2.5).timeout
 
-	# === FASE 5: Portão abre + NPCs invadem castelo ===
+	# === Portão abre + NPCs invadem castelo ===
 	gate_open = 1.0
 	shake = 6.0
 	Sfx.play("horn")
 	await get_tree().create_timer(0.8).timeout
 	# Fogo no castelo
 	for pos in _CASTLE_FIRE_POS:
-		fires.append(_spawn_fire(pos, CASTLE_FIRE_TEX, 24, 32))
+		_revolt_fires.append(_spawn_fire(pos, CASTLE_FIRE_TEX, 24, 32))
 		emit_particle("fire_sparks", pos)
 	cam_target = Vector2(640, 150)
 	for n: NPC in revolt_npcs:
@@ -1496,15 +1585,6 @@ func _victory_sequence() -> void:
 	await get_tree().create_timer(0.5).timeout
 	create_tween().tween_property(self, "flag_drop", 1.0, 1.5)
 
-	# Fade gradual para preto
-	var fade := ColorRect.new()
-	fade.color = Color(0, 0, 0, 0)
-	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	fade.z_index = 50
-	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(fade)
-	tw = create_tween()
-	tw.tween_property(fade, "color:a", 1.0, 3.0)
 	Sfx.play("thud")
 	await get_tree().create_timer(1.0).timeout
 	king.fall()
@@ -1512,25 +1592,274 @@ func _victory_sequence() -> void:
 		n.say("" , 0.1)
 	await get_tree().create_timer(2.5).timeout
 
-	# Limpa fogos e armas
-	for f in fires:
-		if is_instance_valid(f):
-			f.queue_free()
+	# Limpa armas dos NPCs (fogos permanecem para o cenário)
 	for n: NPC in revolt_npcs:
 		for child in n.get_children():
 			if child is Sprite2D and child.texture is AtlasTexture and child.texture.atlas == WEAPONS_TEX:
 				child.queue_free()
 		n.moving = false
 		n.set_physics_process(false)
+	var guard_end: NPC = npcs.get("npc_guard")
+	if guard_end:
+		guard_end.moving = false
+		guard_end.set_physics_process(false)
+	var guard2_end: NPC = npcs.get("npc_guard2")
+	if guard2_end:
+		guard2_end.moving = false
+		guard2_end.set_physics_process(false)
 	king.moving = false
 	king.set_physics_process(false)
 
-	# Flash branco final
-	fade.color = Color(1, 1, 1, 1)
-	tw = create_tween()
-	tw.tween_property(fade, "color:a", 0.0, 0.8)
-	await tw.finished
-	fade.queue_free()
+	# ======================== CONCLUSÃO CINEMATOGRÁFICA ========================
+	await _conclusion_sequence()
+
+
+## Conclusão cinematográfica em 3 partes (a 4ª parte acontece em main.gd/show_victory).
+func _conclusion_sequence() -> void:
+	var nm := str(Game.player_name)
+
+	# ---- PARTE 1: Visor de pulso — parabéns da Agência (interrompido) ----
+	cam_target = player.global_position
+	cam_zoom = 1.0
+	var wrist := WristIntro.new()
+	hud.add_child(wrist)
+	# Sobrescreve as páginas DEPOIS do _ready() ter rodado (que chama _build_pages()).
+	wrist._pages = _conclusion_wrist_pages(nm)
+	wrist.play()
+	await wrist.finished
+	# O wrist intro termina com flash branco; dissolver o branco para revelar a vila.
+	wrist.reveal_world()
+	await get_tree().create_timer(0.8).timeout
+
+	# ---- PARTE 2: A Figura Misteriosa sai de um portal ----
+	Sfx.play("portal_open")
+	shake = 3.0
+	# Criar portal (sprite reutilizando a plataforma de teletransporte)
+	var portal_pos := player.global_position + Vector2(0, -80)
+	cam_target = (player.global_position + portal_pos) / 2.0
+
+	# Glow do portal
+	var portal_glow := Sprite2D.new()
+	portal_glow.texture = load("res://assets/gen/props/glow.png")
+	portal_glow.position = portal_pos
+	portal_glow.scale = Vector2.ZERO
+	portal_glow.modulate = Color(0.3, 0.8, 1.0, 0.9)
+	portal_glow.z_index = 30
+	add_child(portal_glow)
+	var tw_portal := create_tween()
+	tw_portal.tween_property(portal_glow, "scale", Vector2(6, 6), 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	await get_tree().create_timer(0.6).timeout
+
+	# Figura misteriosa (usa sprite do NPC genérico com cores futuristas)
+	var figure := _create_conclusion_figure("figure_mystery", portal_pos + Vector2(0, -20),
+		Color(0.3, 0.8, 0.9))  # azul futurista
+	figure.visible = false
+	emit_particle("sparkle_gold", portal_pos)
+	emit_particle("smoke_thin", portal_pos)
+	await get_tree().create_timer(0.4).timeout
+	figure.visible = true
+	figure.modulate = Color(2, 2, 2, 1)
+	create_tween().tween_property(figure, "modulate", Color.WHITE, 0.5)
+
+	# Figura olha para a vila pegando fogo, desnorteada
+	await get_tree().create_timer(1.2).timeout
+	_conclusion_say(figure, "Droga... cheguei tarde demais aqui...", 4.0)
+	await get_tree().create_timer(4.5).timeout
+
+	# Olha para o jogador
+	_conclusion_face_player(figure)
+	await get_tree().create_timer(0.8).timeout
+	_conclusion_say(figure, "VOCÊ AÍ!!!", 2.0)
+	shake = 4.0
+	Sfx.play("shout")
+	await get_tree().create_timer(2.5).timeout
+
+	_conclusion_say(figure, "Você que fez isso, né...", 3.0)
+	await get_tree().create_timer(3.5).timeout
+
+	_conclusion_say(figure, "Você não pode mais escutar a Agência! Esse Rei não ia fazer mal algum, ele ia trazer Paz!", 6.0)
+	await get_tree().create_timer(6.5).timeout
+
+	_conclusion_say(figure, "A Agência está tirando o livre-arbítrio das pessoas, mudando a forma de pensar delas... sussurrando boatos... mudando a história...", 7.0)
+	await get_tree().create_timer(7.5).timeout
+
+	_conclusion_say(figure, "O Diretor não é quem você pensa qu----", 3.0)
+	await get_tree().create_timer(1.5).timeout
+
+	# ---- PARTE 3: Agentes da Agência chegam e silenciam a Figura ----
+	Sfx.play("portal_open")
+	shake = 6.0
+
+	# Mais portais abrem dos lados
+	var agent_positions := [
+		player.global_position + Vector2(-80, -60),
+		player.global_position + Vector2(80, -60),
+		player.global_position + Vector2(-50, -100),
+	]
+	var agents: Array[Sprite2D] = []
+	for i in agent_positions.size():
+		var glow := Sprite2D.new()
+		glow.texture = load("res://assets/gen/props/glow.png")
+		glow.position = agent_positions[i]
+		glow.scale = Vector2.ZERO
+		glow.modulate = Color(1.0, 0.3, 0.2, 0.8)
+		glow.z_index = 30
+		add_child(glow)
+		var tw_ag := create_tween()
+		tw_ag.tween_property(glow, "scale", Vector2(4, 4), 0.3).set_trans(Tween.TRANS_BACK)
+		await get_tree().create_timer(0.15).timeout
+		var agent := _create_conclusion_figure("agent_%d" % i, agent_positions[i],
+			Color(0.15, 0.15, 0.2))  # preto/escuro
+		agents.append(agent)
+		emit_particle("smoke_thin", agent_positions[i])
+		# Encolhe o glow rápido (portal se fecha)
+		create_tween().tween_property(glow, "scale", Vector2.ZERO, 0.4).set_delay(0.3)
+
+	await get_tree().create_timer(0.5).timeout
+
+	# Agentes "atacam" a figura — flash vermelho + partículas
+	Sfx.play("thud")
+	shake = 8.0
+	emit_particle("sparkle_red", figure.position)
+	emit_particle("sparkle_red", figure.position + Vector2(-10, 5))
+	hud.flash_danger()
+	# Figura cai
+	var tw_fall := create_tween()
+	tw_fall.tween_property(figure, "rotation", PI / 2.0, 0.3).set_trans(Tween.TRANS_SINE)
+	tw_fall.parallel().tween_property(figure, "modulate:a", 0.5, 0.3)
+	await get_tree().create_timer(1.5).timeout
+
+	# Agentes arrastam o corpo para outro portal
+	var exit_portal_pos := player.global_position + Vector2(0, -120)
+	var exit_glow := Sprite2D.new()
+	exit_glow.texture = load("res://assets/gen/props/glow.png")
+	exit_glow.position = exit_portal_pos
+	exit_glow.scale = Vector2.ZERO
+	exit_glow.modulate = Color(1.0, 0.3, 0.2, 0.8)
+	exit_glow.z_index = 30
+	add_child(exit_glow)
+	create_tween().tween_property(exit_glow, "scale", Vector2(5, 5), 0.4).set_trans(Tween.TRANS_BACK)
+	emit_particle("smoke_thin", exit_portal_pos)
+	Sfx.play("whoosh")
+	await get_tree().create_timer(0.5).timeout
+
+	# Arrastam a figura
+	var tw_drag := create_tween()
+	tw_drag.tween_property(figure, "position", exit_portal_pos, 1.5).set_trans(Tween.TRANS_SINE)
+	for agent in agents:
+		if agent != agents.back():
+			create_tween().tween_property(agent, "position", exit_portal_pos, 1.5).set_trans(Tween.TRANS_SINE)
+	await get_tree().create_timer(1.0).timeout
+
+	# Um agente fica para trás e fala com o jogador
+	var last_agent: Sprite2D = agents.back()
+	_conclusion_face_player(last_agent)
+	_conclusion_say(last_agent, "Desculpa por isso... mas você não deveria saber disso.", 4.5)
+	await get_tree().create_timer(5.0).timeout
+
+	_conclusion_say(last_agent, "Óbvio, você é só um estagiário...", 3.0)
+	await get_tree().create_timer(2.5).timeout
+
+	# Agente puxa um dispositivo e dá um flash — tela branca total
+	Sfx.play("whoosh")
+	shake = 3.0
+	await get_tree().create_timer(0.5).timeout
+
+	# Figura e portal se fecham, agentes somem
+	figure.queue_free()
+	for agent in agents:
+		agent.queue_free()
+	portal_glow.queue_free()
+	exit_glow.queue_free()
+
+	# Flash de memória — tela completamente branca (no HUD CanvasLayer para cobrir tudo)
+	Sfx.play("confirm")
+	var mem_flash := ColorRect.new()
+	mem_flash.color = Color(1, 1, 1, 0)
+	mem_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	mem_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(mem_flash)
+	var tw_mem := create_tween()
+	tw_mem.tween_property(mem_flash, "color:a", 1.0, 0.3)
+	await tw_mem.finished
+	await get_tree().create_timer(2.0).timeout
+
+	# Limpa os fogos finais
+	for f in _revolt_fires:
+		if is_instance_valid(f):
+			f.queue_free()
+	_revolt_fires.clear()
+
+	mem_flash.queue_free()
+
+
+func _conclusion_wrist_pages(nm: String) -> Array[Dictionary]:
+	var y := "[color=#ffd76a]"
+	var r := "[color=#ff7a7a]"
+	var c := "[color=#7ff6ff]"
+	var e := "[/color]"
+	var pages: Array[Dictionary] = [
+		{"title": "RELATÓRIO", "text":
+			"%s> CANAL SEGURO ABERTO.%s\n\n%sMissão concluída, Operador %s.%s\n\nAnomalia temporal neutralizada.\nO Rei Aldemar I foi deposto pelo povo.\nA linha do tempo foi... %sprotegida%s." % [c, e, y, nm, e, c, e]},
+		{"title": "AVALIAÇÃO", "text":
+			"Parabéns. Você completou sua %sprimeira missão%s pela Agência Panóptico.\n\nDe muitas missões que virão... em breve você receberá novas ordens.\n\n%sPreparando extração dimensional...%s\n\n%s> AGUARDE INSTRUÇÕES----%s" % [y, e, c, e, r, e]},
+	]
+	return pages
+
+
+func _create_conclusion_figure(fig_id: String, pos: Vector2, col: Color) -> Sprite2D:
+	var spr := Sprite2D.new()
+	# Usa o sprite do guarda como base (mais "encorpado"), com modulate para cor futurista.
+	spr.texture = load("res://assets/gen/chars/npc_guard.png")
+	spr.hframes = 4
+	spr.vframes = 3
+	spr.centered = false
+	spr.offset = Vector2(-8, -23)
+	spr.scale = Vector2(2, 2)
+	spr.frame = 0  # olhando para frente
+	spr.modulate = col.lightened(0.4)
+	spr.position = pos
+	spr.z_index = 20
+	spr.name = fig_id
+	add_child(spr)
+	return spr
+
+
+func _conclusion_say(spr: Sprite2D, text: String, dur: float) -> void:
+	# Balão de fala como nó irmão (não filho do sprite, para evitar herdar scale 2x).
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.size = Vector2(200, 80)
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_color_override("font_color", Color.WHITE)
+	lbl.z_index = 100
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(0.05, 0.05, 0.1, 0.88)
+	bg_style.set_corner_radius_all(4)
+	bg_style.set_content_margin_all(6)
+	lbl.add_theme_stylebox_override("normal", bg_style)
+	lbl.position = spr.position + Vector2(-100, -70)
+	add_child(lbl)
+	lbl.scale = Vector2.ZERO
+	lbl.pivot_offset = Vector2(100, 40)
+	var tw := create_tween()
+	tw.tween_property(lbl, "scale", Vector2.ONE, 0.15).set_trans(Tween.TRANS_BACK)
+	tw.tween_interval(dur)
+	tw.tween_property(lbl, "scale", Vector2.ZERO, 0.1)
+	tw.tween_callback(lbl.queue_free)
+
+
+func _conclusion_face_player(spr: Sprite2D) -> void:
+	var dir_to_player := spr.position.direction_to(player.global_position)
+	if absf(dir_to_player.x) > absf(dir_to_player.y) * 0.9:
+		spr.frame = 2 * 4  # lateral
+		spr.flip_h = dir_to_player.x > 0
+	elif dir_to_player.y > 0:
+		spr.frame = 0  # olha para baixo (frente)
+	else:
+		spr.frame = 1 * 4  # olha para cima (costas)
 
 
 var _defeat_reason := ""
@@ -1788,6 +2117,29 @@ func _on_npc_confronts(npc: NPC) -> void:
 		phase = Phase.PURSUIT
 		player.input_enabled = true
 		hud.set_pursuit_mode(true)
+
+
+## Módulo 2: guarda/rei viu o jogador carregando item suspeito no cone de visão.
+func _on_vision_cone_caught(npc: NPC, _target: Node2D) -> void:
+	if phase != Phase.ACTION and phase != Phase.ACTIVE_EVENT:
+		return
+	hud.flash_danger()
+	Sfx.play("shout")
+	npc.start_pursuit(player, 15.0)
+	phase = Phase.PURSUIT
+	hud.set_pursuit_mode(true)
+	# Perde 1 PA como penalidade de ser visto.
+	Game.spend_ap(1)
+	hud.toast("Flagrante! Você perdeu 1 Ponto de Ação.", 3.0)
+	# Devolve o item ao local original se o jogador o carrega.
+	if held != null:
+		var obj := held
+		var return_pos := held_from if held_from != Vector2.ZERO else \
+			player.global_position + Vector2(randf_range(-20, 20), 10)
+		held = null
+		obj.held = false
+		obj.global_position = return_pos
+		player.forget_held()
 
 
 func _on_npc_catches_player(npc: NPC) -> void:
