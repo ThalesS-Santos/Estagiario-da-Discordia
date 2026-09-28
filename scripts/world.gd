@@ -3536,16 +3536,40 @@ func _apply_event_effects(event_id: String) -> void:
 			Game.set_instability(100.0)
 
 
+const _CONVERSA_NEUTRA := [
+	"Você ouviu sobre o decreto?", "A praça está diferente hoje...",
+	"Não sei se confio mais no guarda.", "Será que é verdade aquilo?",
+	"O padeiro me disse algo preocupante.", "Tenho um mau pressentimento.",
+]
+const _CONVERSA_TENSA := [
+	"Eu ouvi que o Rei está escondendo algo!", "Isso não pode continuar assim!",
+	"O ferreiro está furioso, sabia?", "Alguém precisa fazer alguma coisa!",
+	"Até quando vamos aguentar?!", "O povo está cansado!",
+]
+const _DISCUSSAO := [
+	"Você está maluco?!", "Cala a boca!", "Não fale assim do Rei!",
+	"Você é cego?! Não vê o que acontece?!", "Traidor!", "Covarde!",
+	"Quem você pensa que é?!", "Sai da minha frente!",
+]
+const _BRIGA := [
+	"Vou te ensinar!", "Toma!", "Para trás!", "Sai daqui!",
+]
+
+
 func _update_ambient_panic() -> void:
 	var instab := Game.instability
 	if instab < 30.0:
 		return
 	var all_npcs: Array = npcs.values() + villagers
-	# Chance de reação aumenta com instabilidade: 0% em 30%, 60% em 100%
 	var panic_chance := clampf((instab - 30.0) / 70.0, 0.0, 1.0) * 0.6
 	var frases_leve := ["Algo está errado...", "Que estranho...", "Estou com mau pressentimento."]
 	var frases_alto := ["O que está acontecendo?!", "Isso é preocupante!", "Devemos nos reunir!"]
 	var frases_critico := ["O povo está em fúria!", "Isso vai acabar mal!", "Agentes do mal entre nós!"]
+
+	# === Dia 2+ com 50%+ de instabilidade: NPCs interagem entre si ===
+	if Game.day >= 2 and instab >= 50.0:
+		_npc_social_interactions(all_npcs, instab)
+
 	for npc: NPC in all_npcs:
 		if not npc.visible or not is_instance_valid(npc) or npc.pursuing or npc.fallen:
 			continue
@@ -3556,7 +3580,6 @@ func _update_ambient_panic() -> void:
 			if randf() < 0.5:
 				npc.say(frases_critico[randi() % frases_critico.size()], 3.5)
 				npc.hurt_mood(0.3, 0.3)
-			# NPCs correm em direção a outros para se agrupar
 			if randf() < 0.4 and not npc.moving:
 				var others := all_npcs.filter(func(o): return o != npc and is_instance_valid(o) and o.visible and not o.pursuing)
 				if not others.is_empty():
@@ -3573,13 +3596,120 @@ func _update_ambient_panic() -> void:
 				npc.show_emote("...", 1.8)
 				if randf() < 0.2:
 					npc.say(frases_leve[randi() % frases_leve.size()], 2.5)
-	# Em instabilidade alta: guardas aceleram patrulha e ficam em alerta base
 	if instab >= 60.0:
 		var guard: NPC = npcs.get("npc_guard")
 		if guard and is_instance_valid(guard) and not guard.pursuing and not guard.fallen:
 			if not guard.moving and guard.ambient:
 				guard.show_emote("!", 1.5)
 				guard.say("Preciso ficar de olho...", 2.5)
+
+
+func _npc_social_interactions(all_npcs: Array, instab: float) -> void:
+	var valid := all_npcs.filter(func(n: NPC): return is_instance_valid(n) and n.visible and not n.fallen and not n.pursuing)
+	if valid.size() < 2:
+		return
+	# Encontrar pares próximos (< 80px)
+	var pairs: Array = []
+	for i in valid.size():
+		for j in range(i + 1, valid.size()):
+			var dist := valid[i].global_position.distance_to(valid[j].global_position)
+			if dist < 80.0:
+				pairs.append([valid[i], valid[j]])
+	if pairs.is_empty():
+		# Se não há pares próximos, fazer alguém ir até outro para conversar
+		if randf() < 0.3:
+			var a: NPC = valid[randi() % valid.size()]
+			var b: NPC = valid[randi() % valid.size()]
+			if a != b and not a.moving:
+				a.walk_to(b.global_position + Vector2(randf_range(-20, 20), randf_range(-10, 10)))
+		return
+
+	# Escolher um par aleatório para interagir
+	var pair: Array = pairs[randi() % pairs.size()]
+	var npc_a: NPC = pair[0]
+	var npc_b: NPC = pair[1]
+
+	# Tipo de interação baseado na instabilidade
+	var roll := randf()
+	if instab >= 75.0:
+		# Alta instabilidade: briga física (empurrão + gritos)
+		if roll < 0.35:
+			_npc_fight(npc_a, npc_b)
+		elif roll < 0.65:
+			_npc_argument(npc_a, npc_b)
+		else:
+			_npc_conversation(npc_a, npc_b, true)
+	elif instab >= 60.0:
+		# Média-alta: discussões acaloradas e empurrões ocasionais
+		if roll < 0.15:
+			_npc_fight(npc_a, npc_b)
+		elif roll < 0.50:
+			_npc_argument(npc_a, npc_b)
+		else:
+			_npc_conversation(npc_a, npc_b, true)
+	else:
+		# 50-60%: conversas tensas, discussão rara
+		if roll < 0.10:
+			_npc_argument(npc_a, npc_b)
+		elif roll < 0.50:
+			_npc_conversation(npc_a, npc_b, true)
+		else:
+			_npc_conversation(npc_a, npc_b, false)
+
+
+func _npc_conversation(a: NPC, b: NPC, tense: bool) -> void:
+	var frases := _CONVERSA_TENSA if tense else _CONVERSA_NEUTRA
+	a.say(frases[randi() % frases.size()], 3.5)
+	a.show_emote("?" if not tense else "!", 2.5)
+	# O outro responde depois de um breve intervalo
+	get_tree().create_timer(1.5).timeout.connect(func():
+		if is_instance_valid(b) and not b.fallen:
+			b.say(frases[randi() % frases.size()], 3.0)
+			b.show_emote("..." if not tense else "?", 2.0)
+	)
+
+
+func _npc_argument(a: NPC, b: NPC) -> void:
+	a.say(_DISCUSSAO[randi() % _DISCUSSAO.size()], 3.5)
+	a.show_emote("!", 3.0)
+	a.hurt_mood(0.2, 0.2)
+	emit_particle("exclamation", (a.global_position + b.global_position) / 2.0)
+	get_tree().create_timer(1.0).timeout.connect(func():
+		if is_instance_valid(b) and not b.fallen:
+			b.say(_DISCUSSAO[randi() % _DISCUSSAO.size()], 3.5)
+			b.show_emote("!", 2.5)
+			b.hurt_mood(0.2, 0.2)
+	)
+	# Se estiverem longe, aproximar para discutir cara a cara
+	if a.global_position.distance_to(b.global_position) > 30.0 and not a.moving:
+		a.walk_to(b.global_position + Vector2(randf_range(-15, 15), randf_range(-8, 8)), true)
+
+
+func _npc_fight(a: NPC, b: NPC) -> void:
+	a.say(_BRIGA[randi() % _BRIGA.size()], 3.0)
+	a.show_emote("!", 2.5)
+	b.show_emote("!", 2.5)
+	# Empurrão: A empurra B
+	a.current_state = "ANGRY"
+	a.hurt_mood(0.4, 0.3)
+	b.hurt_mood(0.3, 0.4)
+	a.walk_to(b.global_position, true)
+	emit_particle("smoke_thin", (a.global_position + b.global_position) / 2.0)
+	emit_particle("stars_dizzy", (a.global_position + b.global_position) / 2.0 + Vector2(0, -8))
+	shake = 2.0
+	Sfx.play("thud")
+	get_tree().create_timer(0.8).timeout.connect(func():
+		if is_instance_valid(b) and not b.fallen:
+			b.say(_BRIGA[randi() % _BRIGA.size()], 2.5)
+			# B tropeça para trás
+			var push_dir := a.global_position.direction_to(b.global_position)
+			b.walk_to(b.global_position + push_dir * 30.0)
+			b.hurt_mood(0.3, 0.3)
+	)
+	get_tree().create_timer(1.8).timeout.connect(func():
+		if is_instance_valid(a) and not a.fallen:
+			a.current_state = "IDLE"
+	)
 
 
 func _update_cam(_delta: float) -> void:

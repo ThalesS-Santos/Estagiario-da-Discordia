@@ -710,14 +710,19 @@ func add_event_log(text: String) -> void:
 		old.queue_free()
 	if _event_log.size() > EVENT_LOG_MAX:
 		_event_log = _event_log.slice(-EVENT_LOG_MAX)
-	if _event_log_expanded:
-		_scroll_event_log_to_end.call_deferred()
-	else:
-		_event_log_unread += 1
+	if not _event_log_expanded:
+		_event_log_expanded = true
+		event_log_panel.visible = true
 		_update_event_log_btn()
-		var tw := create_tween()
-		tw.tween_property(_event_log_btn, "modulate", Color(1.5, 1.2, 0.5), 0.15)
-		tw.tween_property(_event_log_btn, "modulate", Color(1, 1, 1), 0.4)
+		# Animação de abertura suave
+		event_log_panel.modulate.a = 0.0
+		var tw_open := create_tween()
+		tw_open.tween_property(event_log_panel, "modulate:a", 1.0, 0.3)
+	_scroll_event_log_to_end.call_deferred()
+	# Flash no botão para chamar atenção
+	var tw := create_tween()
+	tw.tween_property(_event_log_btn, "modulate", Color(1.5, 1.2, 0.5), 0.15)
+	tw.tween_property(_event_log_btn, "modulate", Color(1, 1, 1), 0.4)
 
 
 func _event_log_entry(idx: int, text: String) -> RichTextLabel:
