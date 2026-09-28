@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 _mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 Game="*res://scripts/game.gd"
+Music="*res://scripts/music.gd"
 Sfx="*res://scripts/sfx.gd"
 Director="*res://scripts/director.gd"
 
