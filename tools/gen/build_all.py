@@ -11,6 +11,7 @@ import props
 import terrain
 import player_assets
 import revolt_assets
+import conclusion_chars
 import ui_assets
 from common import OUT, rng, math
 
@@ -27,6 +28,7 @@ def main():
     meta.update(player_assets.generate())
     meta.update(intro_assets.generate())
     meta.update(revolt_assets.generate())
+    conclusion_chars.build_all()
     for cid in chars.CHARS:
         meta[f"chars/{cid}"] = {"hframes": 4, "vframes": 3, "origin": [8, 23]}
     meta["chars/shadow"] = {"hframes": 1, "origin": [7, 2]}

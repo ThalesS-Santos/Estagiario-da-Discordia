@@ -1617,162 +1617,193 @@ func _victory_sequence() -> void:
 ## Conclusão cinematográfica em 3 partes (a 4ª parte acontece em main.gd/show_victory).
 func _conclusion_sequence() -> void:
 	var nm := str(Game.player_name)
+	var _concl_nodes: Array[Node] = []
 
-	# ---- PARTE 1: Visor de pulso — parabéns da Agência (interrompido) ----
+	# ---- PARTE 1: Visor de pulso ----
 	cam_target = player.global_position
 	cam_zoom = 1.0
 	var wrist := WristIntro.new()
 	hud.add_child(wrist)
-	# Sobrescreve as páginas DEPOIS do _ready() ter rodado (que chama _build_pages()).
 	wrist._pages = _conclusion_wrist_pages(nm)
 	wrist.play()
 	await wrist.finished
-	# O wrist intro termina com flash branco; dissolver o branco para revelar a vila.
 	wrist.reveal_world()
 	await get_tree().create_timer(0.8).timeout
 
-	# ---- PARTE 2: A Figura Misteriosa sai de um portal ----
+	# ---- Transição: vila destruída ----
+	# Escurecer o ambiente (noite pós-revolta)
+	var dark_overlay := CanvasModulate.new()
+	dark_overlay.color = Color(0.45, 0.35, 0.25, 1.0)
+	add_child(dark_overlay)
+	_concl_nodes.append(dark_overlay)
+
+	# Espalhar fogos pela vila se não existirem da revolta
+	if _revolt_fires.is_empty():
+		var fire_positions := [
+			Game.loc_pos("plaza") + Vector2(-40, -20),
+			Game.loc_pos("plaza") + Vector2(60, 10),
+			Game.loc_pos("bakery") + Vector2(20, -10),
+			Game.loc_pos("forge") + Vector2(-10, 5),
+			Game.loc_pos("castle_gate") + Vector2(0, 30),
+		]
+		for fp in fire_positions:
+			var fire := _spawn_fire(fp, FIRE_TEX, 16, 24)
+			_revolt_fires.append(fire)
+			emit_particle("fire_sparks", fp)
+	# Fumaça subindo em vários pontos
+	for fp_idx in _revolt_fires.size():
+		if fp_idx < 3 and is_instance_valid(_revolt_fires[fp_idx]):
+			emit_particle("smoke_thin", _revolt_fires[fp_idx].position + Vector2(0, -20))
+
+	await get_tree().create_timer(0.5).timeout
+
+	# ---- PARTE 2: A Figura Misteriosa ----
 	Sfx.play("portal_open")
 	shake = 3.0
-	# Criar portal (sprite reutilizando a plataforma de teletransporte)
 	var portal_pos := player.global_position + Vector2(0, -80)
 	cam_target = (player.global_position + portal_pos) / 2.0
 
-	# Glow do portal
-	var portal_glow := Sprite2D.new()
-	portal_glow.texture = load("res://assets/gen/props/glow.png")
-	portal_glow.position = portal_pos
-	portal_glow.scale = Vector2.ZERO
-	portal_glow.modulate = Color(0.3, 0.8, 1.0, 0.9)
-	portal_glow.z_index = 30
-	add_child(portal_glow)
-	var tw_portal := create_tween()
-	tw_portal.tween_property(portal_glow, "scale", Vector2(6, 6), 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	await get_tree().create_timer(0.6).timeout
-
-	# Figura misteriosa (usa sprite do NPC genérico com cores futuristas)
-	var figure := _create_conclusion_figure("figure_mystery", portal_pos + Vector2(0, -20),
-		Color(0.3, 0.8, 0.9))  # azul futurista
-	figure.visible = false
+	var portal_spr := _create_animated_portal(portal_pos, "cyan")
+	_concl_nodes.append(portal_spr)
 	emit_particle("sparkle_gold", portal_pos)
 	emit_particle("smoke_thin", portal_pos)
-	await get_tree().create_timer(0.4).timeout
-	figure.visible = true
-	figure.modulate = Color(2, 2, 2, 1)
-	create_tween().tween_property(figure, "modulate", Color.WHITE, 0.5)
-
-	# Figura olha para a vila pegando fogo, desnorteada
-	await get_tree().create_timer(1.2).timeout
-	_conclusion_say(figure, "Droga... cheguei tarde demais aqui...", 4.0)
-	await get_tree().create_timer(4.5).timeout
-
-	# Olha para o jogador
-	_conclusion_face_player(figure)
 	await get_tree().create_timer(0.8).timeout
-	_conclusion_say(figure, "VOCÊ AÍ!!!", 2.0)
-	shake = 4.0
+
+	var figure := _create_conclusion_figure("figure_mystery", portal_pos + Vector2(0, 10), true)
+	_concl_nodes.append(figure)
+	figure.visible = false
+	await get_tree().create_timer(0.3).timeout
+	figure.visible = true
+	figure.modulate = Color(2.5, 2.5, 2.5, 1)
+	create_tween().tween_property(figure, "modulate", Color.WHITE, 0.6)
+	# Fechar portal de entrada
+	create_tween().tween_property(portal_spr, "scale", Vector2.ZERO, 0.5).set_delay(0.5)
+
+	await get_tree().create_timer(1.5).timeout
+	_conclusion_say(figure, "Droga...\nCheguei tarde demais.", 3.5)
+	await get_tree().create_timer(4.0).timeout
+
+	_conclusion_face_player(figure)
+	await get_tree().create_timer(0.6).timeout
 	Sfx.play("shout")
+	shake = 4.0
+	_conclusion_say(figure, "VOCÊ AÍ!", 2.0)
 	await get_tree().create_timer(2.5).timeout
 
-	_conclusion_say(figure, "Você que fez isso, né...", 3.0)
+	_conclusion_say(figure, "Foi você que fez isso, né...", 3.0)
 	await get_tree().create_timer(3.5).timeout
 
-	_conclusion_say(figure, "Você não pode mais escutar a Agência! Esse Rei não ia fazer mal algum, ele ia trazer Paz!", 6.0)
+	_conclusion_say(figure, "Esse Rei ia trazer Paz!\nA Agência mentiu para você!", 5.0)
+	await get_tree().create_timer(5.5).timeout
+
+	_conclusion_say(figure, "Eles tiram o livre-arbítrio\ndas pessoas... sussurram\nboatos... mudam a história.", 6.0)
 	await get_tree().create_timer(6.5).timeout
 
-	_conclusion_say(figure, "A Agência está tirando o livre-arbítrio das pessoas, mudando a forma de pensar delas... sussurrando boatos... mudando a história...", 7.0)
-	await get_tree().create_timer(7.5).timeout
+	_conclusion_say(figure, "O Diretor não é quem\nvocê pensa qu----", 2.5)
+	await get_tree().create_timer(1.2).timeout
 
-	_conclusion_say(figure, "O Diretor não é quem você pensa qu----", 3.0)
-	await get_tree().create_timer(1.5).timeout
-
-	# ---- PARTE 3: Agentes da Agência chegam e silenciam a Figura ----
+	# ---- PARTE 3: Agentes silenciam a Figura ----
 	Sfx.play("portal_open")
 	shake = 6.0
 
-	# Mais portais abrem dos lados
 	var agent_positions := [
-		player.global_position + Vector2(-80, -60),
-		player.global_position + Vector2(80, -60),
-		player.global_position + Vector2(-50, -100),
+		player.global_position + Vector2(-90, -50),
+		player.global_position + Vector2(90, -50),
+		player.global_position + Vector2(0, -110),
 	]
 	var agents: Array[Sprite2D] = []
+	var agent_portals: Array[AnimatedSprite2D] = []
 	for i in agent_positions.size():
-		var glow := Sprite2D.new()
-		glow.texture = load("res://assets/gen/props/glow.png")
-		glow.position = agent_positions[i]
-		glow.scale = Vector2.ZERO
-		glow.modulate = Color(1.0, 0.3, 0.2, 0.8)
-		glow.z_index = 30
-		add_child(glow)
-		var tw_ag := create_tween()
-		tw_ag.tween_property(glow, "scale", Vector2(4, 4), 0.3).set_trans(Tween.TRANS_BACK)
-		await get_tree().create_timer(0.15).timeout
-		var agent := _create_conclusion_figure("agent_%d" % i, agent_positions[i],
-			Color(0.15, 0.15, 0.2))  # preto/escuro
-		agents.append(agent)
+		var ap := _create_animated_portal(agent_positions[i], "red")
+		agent_portals.append(ap)
+		_concl_nodes.append(ap)
 		emit_particle("smoke_thin", agent_positions[i])
-		# Encolhe o glow rápido (portal se fecha)
-		create_tween().tween_property(glow, "scale", Vector2.ZERO, 0.4).set_delay(0.3)
+		await get_tree().create_timer(0.2).timeout
+		var agent := _create_conclusion_figure("agent_%d" % i, agent_positions[i], false)
+		agents.append(agent)
+		_concl_nodes.append(agent)
+		_conclusion_face_figure(agent, figure)
+		create_tween().tween_property(ap, "scale", Vector2.ZERO, 0.4).set_delay(0.3)
 
-	await get_tree().create_timer(0.5).timeout
+	await get_tree().create_timer(0.6).timeout
 
-	# Agentes "atacam" a figura — flash vermelho + partículas
-	Sfx.play("thud")
-	shake = 8.0
-	emit_particle("sparkle_red", figure.position)
-	emit_particle("sparkle_red", figure.position + Vector2(-10, 5))
+	# Agentes cercam a figura — cada um avança um pouco
+	for agent in agents:
+		var dir_to_fig := agent.position.direction_to(figure.position)
+		create_tween().tween_property(agent, "position",
+			agent.position + dir_to_fig * 25.0, 0.5).set_trans(Tween.TRANS_SINE)
+	await get_tree().create_timer(0.6).timeout
+
+	# Disparos de energia sequenciais
+	for i2 in agents.size():
+		var bolt := Sprite2D.new()
+		bolt.texture = load("res://assets/gen/conclusion/energy_bolt.png")
+		bolt.hframes = 4
+		bolt.frame = i2 % 4
+		bolt.scale = Vector2(3, 3)
+		bolt.z_index = 35
+		bolt.position = agents[i2].position
+		add_child(bolt)
+		_concl_nodes.append(bolt)
+		Sfx.play("thud")
+		shake = 4.0
+		var tw_bolt := create_tween()
+		tw_bolt.tween_property(bolt, "position", figure.position, 0.15)
+		tw_bolt.tween_callback(func():
+			emit_particle("sparkle_red", figure.position)
+			bolt.visible = false
+		)
+		await get_tree().create_timer(0.3).timeout
+
 	hud.flash_danger()
+	shake = 10.0
+	emit_particle("sparkle_red", figure.position + Vector2(-8, 4))
+	emit_particle("sparkle_red", figure.position + Vector2(8, -4))
+
 	# Figura cai
 	var tw_fall := create_tween()
-	tw_fall.tween_property(figure, "rotation", PI / 2.0, 0.3).set_trans(Tween.TRANS_SINE)
-	tw_fall.parallel().tween_property(figure, "modulate:a", 0.5, 0.3)
+	tw_fall.tween_property(figure, "rotation", PI / 2.0, 0.4).set_trans(Tween.TRANS_SINE)
+	tw_fall.parallel().tween_property(figure, "modulate:a", 0.4, 0.4)
 	await get_tree().create_timer(1.5).timeout
 
-	# Agentes arrastam o corpo para outro portal
-	var exit_portal_pos := player.global_position + Vector2(0, -120)
-	var exit_glow := Sprite2D.new()
-	exit_glow.texture = load("res://assets/gen/props/glow.png")
-	exit_glow.position = exit_portal_pos
-	exit_glow.scale = Vector2.ZERO
-	exit_glow.modulate = Color(1.0, 0.3, 0.2, 0.8)
-	exit_glow.z_index = 30
-	add_child(exit_glow)
-	create_tween().tween_property(exit_glow, "scale", Vector2(5, 5), 0.4).set_trans(Tween.TRANS_BACK)
-	emit_particle("smoke_thin", exit_portal_pos)
+	# Portal de saída
+	var exit_pos := player.global_position + Vector2(0, -120)
+	var exit_portal := _create_animated_portal(exit_pos, "red")
+	_concl_nodes.append(exit_portal)
+	emit_particle("smoke_thin", exit_pos)
 	Sfx.play("whoosh")
 	await get_tree().create_timer(0.5).timeout
 
-	# Arrastam a figura
-	var tw_drag := create_tween()
-	tw_drag.tween_property(figure, "position", exit_portal_pos, 1.5).set_trans(Tween.TRANS_SINE)
-	for agent in agents:
-		if agent != agents.back():
-			create_tween().tween_property(agent, "position", exit_portal_pos, 1.5).set_trans(Tween.TRANS_SINE)
+	# Dois agentes arrastam o corpo
+	create_tween().tween_property(figure, "position", exit_pos, 1.2).set_trans(Tween.TRANS_SINE)
+	for i3 in agents.size() - 1:
+		create_tween().tween_property(agents[i3], "position", exit_pos, 1.2).set_trans(Tween.TRANS_SINE)
 	await get_tree().create_timer(1.0).timeout
 
-	# Um agente fica para trás e fala com o jogador
+	# Último agente fala
 	var last_agent: Sprite2D = agents.back()
 	_conclusion_face_player(last_agent)
-	_conclusion_say(last_agent, "Desculpa por isso... mas você não deveria saber disso.", 4.5)
-	await get_tree().create_timer(5.0).timeout
-
-	_conclusion_say(last_agent, "Óbvio, você é só um estagiário...", 3.0)
-	await get_tree().create_timer(2.5).timeout
-
-	# Agente puxa um dispositivo e dá um flash — tela branca total
-	Sfx.play("whoosh")
-	shake = 3.0
+	create_tween().tween_property(last_agent, "position",
+		player.global_position + Vector2(0, -50), 0.8).set_trans(Tween.TRANS_SINE)
 	await get_tree().create_timer(0.5).timeout
 
-	# Figura e portal se fecham, agentes somem
-	figure.queue_free()
-	for agent in agents:
-		agent.queue_free()
-	portal_glow.queue_free()
-	exit_glow.queue_free()
+	_conclusion_say(last_agent, "Desculpa por isso...\nVocê não deveria saber.", 4.0)
+	await get_tree().create_timer(4.5).timeout
 
-	# Flash de memória — tela completamente branca (no HUD CanvasLayer para cobrir tudo)
+	_conclusion_say(last_agent, "Óbvio... você é\nsó um estagiário.", 3.0)
+	await get_tree().create_timer(2.5).timeout
+
+	# Flash de memória
+	Sfx.play("whoosh")
+	shake = 3.0
+	await get_tree().create_timer(0.3).timeout
+
+	# Limpar sprites da cena
+	for cn in _concl_nodes:
+		if is_instance_valid(cn):
+			cn.queue_free()
+	_concl_nodes.clear()
+
 	Sfx.play("confirm")
 	var mem_flash := ColorRect.new()
 	mem_flash.color = Color(1, 1, 1, 0)
@@ -1784,12 +1815,10 @@ func _conclusion_sequence() -> void:
 	await tw_mem.finished
 	await get_tree().create_timer(2.0).timeout
 
-	# Limpa os fogos finais
 	for f in _revolt_fires:
 		if is_instance_valid(f):
 			f.queue_free()
 	_revolt_fires.clear()
-
 	mem_flash.queue_free()
 
 
@@ -1807,17 +1836,40 @@ func _conclusion_wrist_pages(nm: String) -> Array[Dictionary]:
 	return pages
 
 
-func _create_conclusion_figure(fig_id: String, pos: Vector2, col: Color) -> Sprite2D:
+func _create_animated_portal(pos: Vector2, color: String) -> AnimatedSprite2D:
+	var spr := AnimatedSprite2D.new()
+	var frames := SpriteFrames.new()
+	frames.set_animation_speed("default", 8)
+	frames.set_animation_loop("default", true)
+	var tex_path := "res://assets/gen/conclusion/portal_%s.png" % color
+	var tex: Texture2D = load(tex_path)
+	for i in 4:
+		var atlas := AtlasTexture.new()
+		atlas.atlas = tex
+		atlas.region = Rect2(i * 32, 0, 32, 32)
+		frames.add_frame("default", atlas)
+	spr.sprite_frames = frames
+	spr.position = pos
+	spr.scale = Vector2.ZERO
+	spr.z_index = 30
+	add_child(spr)
+	spr.play("default")
+	create_tween().tween_property(spr, "scale", Vector2(3, 3), 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	return spr
+
+
+func _create_conclusion_figure(fig_id: String, pos: Vector2, is_mystery: bool) -> Sprite2D:
 	var spr := Sprite2D.new()
-	# Usa o sprite do guarda como base (mais "encorpado"), com modulate para cor futurista.
-	spr.texture = load("res://assets/gen/chars/npc_guard.png")
+	if is_mystery:
+		spr.texture = load("res://assets/gen/conclusion/figure_mystery.png")
+	else:
+		spr.texture = load("res://assets/gen/conclusion/agent.png")
 	spr.hframes = 4
 	spr.vframes = 3
 	spr.centered = false
 	spr.offset = Vector2(-8, -23)
 	spr.scale = Vector2(2, 2)
-	spr.frame = 0  # olhando para frente
-	spr.modulate = col.lightened(0.4)
+	spr.frame = 0
 	spr.position = pos
 	spr.z_index = 20
 	spr.name = fig_id
@@ -1826,26 +1878,35 @@ func _create_conclusion_figure(fig_id: String, pos: Vector2, col: Color) -> Spri
 
 
 func _conclusion_say(spr: Sprite2D, text: String, dur: float) -> void:
-	# Balão de fala como nó irmão (não filho do sprite, para evitar herdar scale 2x).
 	var lbl := Label.new()
 	lbl.text = text
-	lbl.size = Vector2(200, 80)
+	lbl.size = Vector2(160, 0)
 	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_font_size_override("font_size", 10)
 	lbl.add_theme_color_override("font_color", Color.WHITE)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.z_index = 100
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var bg_style := StyleBoxFlat.new()
-	bg_style.bg_color = Color(0.05, 0.05, 0.1, 0.88)
-	bg_style.set_corner_radius_all(4)
+	bg_style.bg_color = Color(0.02, 0.02, 0.08, 0.92)
+	bg_style.set_corner_radius_all(3)
 	bg_style.set_content_margin_all(6)
+	bg_style.border_color = Color(0.3, 0.8, 1.0, 0.5)
+	bg_style.set_border_width_all(1)
 	lbl.add_theme_stylebox_override("normal", bg_style)
-	lbl.position = spr.position + Vector2(-100, -70)
 	add_child(lbl)
+	# Posicionar centralizado acima do sprite
+	await get_tree().process_frame
+	var min_sz := lbl.get_combined_minimum_size()
+	lbl.size = Vector2(min_sz.x, min_sz.y)
+	lbl.position = spr.position + Vector2(-min_sz.x * 0.5, -min_sz.y - 30)
+	# Garantir que não saia da tela
+	lbl.position.x = clampf(lbl.position.x, 10, 1270 - min_sz.x)
+	lbl.position.y = maxf(lbl.position.y, 10)
 	lbl.scale = Vector2.ZERO
-	lbl.pivot_offset = Vector2(100, 40)
+	lbl.pivot_offset = min_sz * 0.5
 	var tw := create_tween()
-	tw.tween_property(lbl, "scale", Vector2.ONE, 0.15).set_trans(Tween.TRANS_BACK)
+	tw.tween_property(lbl, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_BACK)
 	tw.tween_interval(dur)
 	tw.tween_property(lbl, "scale", Vector2.ZERO, 0.1)
 	tw.tween_callback(lbl.queue_free)
@@ -1854,12 +1915,23 @@ func _conclusion_say(spr: Sprite2D, text: String, dur: float) -> void:
 func _conclusion_face_player(spr: Sprite2D) -> void:
 	var dir_to_player := spr.position.direction_to(player.global_position)
 	if absf(dir_to_player.x) > absf(dir_to_player.y) * 0.9:
-		spr.frame = 2 * 4  # lateral
+		spr.frame = 2 * 4
 		spr.flip_h = dir_to_player.x > 0
 	elif dir_to_player.y > 0:
-		spr.frame = 0  # olha para baixo (frente)
+		spr.frame = 0
 	else:
-		spr.frame = 1 * 4  # olha para cima (costas)
+		spr.frame = 1 * 4
+
+
+func _conclusion_face_figure(spr: Sprite2D, target: Sprite2D) -> void:
+	var dir_to := spr.position.direction_to(target.position)
+	if absf(dir_to.x) > absf(dir_to.y) * 0.9:
+		spr.frame = 2 * 4
+		spr.flip_h = dir_to.x > 0
+	elif dir_to.y > 0:
+		spr.frame = 0
+	else:
+		spr.frame = 1 * 4
 
 
 var _defeat_reason := ""
