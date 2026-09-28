@@ -76,6 +76,8 @@ var _emotes: Texture2D
 # Módulo 2: cone de visão (apenas NPCs de autoridade: guardas e rei)
 var vision_cone: Area2D = null
 var _vision_cone_polygon: CollisionPolygon2D = null
+var _vision_detect_t := 0.0        # timer de polling (0.12s)
+var _vision_detect_cooldown := 0.0 # cooldown após detectar (3s)
 
 # Módulo 4: estado de empurrão NPC vs NPC
 var _push_target: NPC = null      # NPC-alvo para colisão raivosa
@@ -123,7 +125,7 @@ func setup(npc_id: String, d: Dictionary, w) -> void:
 	navigation_agent.path_desired_distance = 4.0
 	navigation_agent.target_desired_distance = 6.0
 	add_child(navigation_agent)
-	if _is_authority():
+	if _is_authority() or id == "villager_elder":
 		_build_vision_cone()
 
 
@@ -136,11 +138,14 @@ func _build_vision_cone() -> void:
 	vision_cone.collision_mask = 2  # camada do jogador
 	vision_cone.monitorable = false
 	var poly := CollisionPolygon2D.new()
-	# Triângulo: ponta na origem, abrindo ~60° para a direita (+X = frente padrão)
+	# Triângulo: ponta na origem, abrindo ~50° para a direita (+X = frente padrão)
+	# Osric tem cone menor (alcance de informante, não de guarda)
+	var depth := 45.0 if id == "villager_elder" else 70.0
+	var spread := 20.0 if id == "villager_elder" else 30.0
 	poly.polygon = PackedVector2Array([
 		Vector2(0, 0),
-		Vector2(120, -50),
-		Vector2(120, 50),
+		Vector2(depth, -spread),
+		Vector2(depth, spread),
 	])
 	vision_cone.add_child(poly)
 	_vision_cone_polygon = poly
@@ -424,6 +429,13 @@ func _physics_process(delta: float) -> void:
 			2: cone_angle = 0.0 if facing > 0 else PI  # lateral
 			_: cone_angle = PI / 2.0
 		vision_cone.rotation = cone_angle
+		# Polling de detecção a cada 0.35s (cobre o caso de pegar item já dentro do cone)
+		_vision_detect_cooldown = maxf(_vision_detect_cooldown - delta, 0.0)
+		if _vision_detect_cooldown <= 0.0:
+			_vision_detect_t -= delta
+			if _vision_detect_t <= 0.0:
+				_vision_detect_t = 0.12
+				_poll_vision_detection()
 	# Módulo 4: cooldown de empurrão e check de colisão raivosa NPC vs NPC
 	if _push_cooldown > 0.0:
 		_push_cooldown -= delta
@@ -466,20 +478,43 @@ func _physics_process(delta: float) -> void:
 	position = position.clamp(Vector2(10, 10), Game.MAP_SIZE - Vector2(10, 10))
 
 
-## Módulo 2: corpo entrou no cone de visão — verifica se é o jogador com item suspeito.
+## Polling a cada 0.35s — detecta itens pegos enquanto já dentro do cone.
+func _poll_vision_detection() -> void:
+	if fallen or pursuing or (not _is_authority() and id != "villager_elder"):
+		return
+	for body in vision_cone.get_overlapping_bodies():
+		if not body.is_in_group("player"):
+			continue
+		var holding_sus: bool = body.has_method("is_holding_suspicious_item") and body.is_holding_suspicious_item()
+		var in_stealth: bool = body.has_method("is_in_stealth_state") and body.is_in_stealth_state()
+		if holding_sus and not in_stealth:
+			_vision_detect_cooldown = 3.0
+			_trigger_vision_detection(body)
+			break
+
+
+## Módulo 2: jogador entrou no cone — verifica item suspeito imediatamente.
 func _on_vision_cone_body_entered(target_body: Node2D) -> void:
-	if fallen or pursuing or not _is_authority():
+	if fallen or pursuing or (not _is_authority() and id != "villager_elder"):
 		return
 	if not target_body.is_in_group("player"):
 		return
-	# Só dispara se o jogador carrega item suspeito e não está em furtividade.
+	if _vision_detect_cooldown > 0.0:
+		return
 	var holding_sus: bool = target_body.has_method("is_holding_suspicious_item") and target_body.is_holding_suspicious_item()
 	var in_stealth: bool = target_body.has_method("is_in_stealth_state") and target_body.is_in_stealth_state()
 	if holding_sus and not in_stealth:
+		_vision_detect_cooldown = 3.0
 		_trigger_vision_detection(target_body)
 
 
 func _trigger_vision_detection(target_node: Node2D) -> void:
+	if id == "villager_elder":
+		show_emote("!", 2.5)
+		say("Rapaz! O que você esconde aí?!", 3.5)
+		if world and world.has_method("_on_osric_reports_to_guard"):
+			world._on_osric_reports_to_guard(self, target_node)
+		return
 	show_emote("!", 2.5)
 	say("Alto aí! O que você tem aí?!", 4.0)
 	Sfx.play("shout")
@@ -593,6 +628,23 @@ func _update_sprite(vel: Vector2) -> void:
 func draw_ui(c: CanvasItem) -> void:
 	var h := 48.0
 	var font := ThemeDB.fallback_font
+	if vision_cone != null:
+		var cone_angle: float
+		match dir:
+			0: cone_angle = PI / 2.0
+			1: cone_angle = -PI / 2.0
+			2: cone_angle = 0.0 if facing > 0 else PI
+			_: cone_angle = PI / 2.0
+		var depth := 45.0 if id == "villager_elder" else 70.0
+		var spread := 20.0 if id == "villager_elder" else 30.0
+		var col_fill := Color(0.55, 0.35, 0.9, 0.38) if id == "villager_elder" else Color(1.0, 0.8, 0.2, 0.45)
+		var col_line := Color(0.55, 0.35, 0.9, 0.75) if id == "villager_elder" else Color(1.0, 0.85, 0.15, 0.85)
+		var p2 := Vector2(depth, -spread).rotated(cone_angle)
+		var p3 := Vector2(depth, spread).rotated(cone_angle)
+		c.draw_colored_polygon(PackedVector2Array([Vector2.ZERO, p2, p3]), col_fill)
+		c.draw_line(Vector2.ZERO, p2, col_line, 1.0)
+		c.draw_line(Vector2.ZERO, p3, col_line, 1.0)
+		c.draw_line(p2, p3, col_line, 1.0)
 	if world and world.show_names and not decor and str(def.get("name", "")) != "":
 		var nm := str(def.name)
 		var tw := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x

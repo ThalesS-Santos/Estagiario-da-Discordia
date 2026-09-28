@@ -167,15 +167,11 @@ func _build_pages() -> Array[Dictionary]:
 	var e := "[/color]"
 	var pages: Array[Dictionary] = [
 		{"title": "CONEXÃO", "text":
-			"%s> CANAL SEGURO ABERTO.%s\n\nOperador %s, aqui é a Central Panóptico.\nPrimeiro dia de estágio... e você já vai a campo.\n\nDestino: a vila do %sRei Aldemar I%s.\nLinha temporal Alfa-3, coordenada 14.7-F." % [c, e, nm, y, e]},
+			"%s> CANAL SEGURO ABERTO.%s\n\nOperador %s, aqui é a Central Panóptico.\nPrimeiro dia de estágio — e você já vai a campo.\n\nDestino: a vila do %sRei Aldemar I%s.\nLinha temporal Alfa-3, coordenada 14.7-F." % [c, e, nm, y, e]},
 		{"title": "O PROBLEMA", "text":
-			"Nossas projeções não deixam dúvida:\nem 3 dias Aldemar declara guerra aos reinos vizinhos.\n\n%sA região inteira será destruída.%s\n\nVocê vai mudar esse futuro. Tem %s3 dias%s no local." % [r, e, y, e]},
-		{"title": "AS REGRAS", "text":
-			"Tire o rei do trono %ssem violência%s e sem se revelar.\nVocê não luta: você %smove objetos%s e %splanta boatos%s.\n\nCada boato mexe com o medo, a raiva e a lealdade dos moradores.\nQuando a %sInstabilidade Social%s chegar a 100%%,\no próprio povo derruba o rei." % [r, e, c, e, c, e, c, e]},
-		{"title": "PRIMEIRO PASSO", "text":
-			"O castelo fica ao norte. O portão é vigiado por %sBram, o guarda%s.\n\n%s1.%s Descubra a fraqueza de Bram: ouça os moradores, junte pistas.\n%s2.%s Crie uma distração que o tire do posto.\n%s3.%s Com o portão livre, cruze-o. O povo fará o resto.\n\n%sCuidado:%s o Ancião Osric vigia o portão de longe." % [y, e, c, e, c, e, c, e, r, e]},
-		{"title": "FERRAMENTAS", "text":
-			"%s[CLIQUE]%s pegar um objeto e levá-lo para outro lugar.\n         Ao soltar, escreva o boato que ele vai espalhar.\n%s[E]%s      sussurrar um boato, chegando por trás de alguém.\n\nCada ação gasta %s1 PA%s. Você tem %s3 PA por dia%s.\nSe alguém desconfiar demais... %scorra%s.\n\n%s> Salto dimensional pronto. Boa sorte, estagiário.%s" % [c, e, c, e, y, e, y, e, r, e, c, e]},
+			"Nossas projeções não deixam dúvida:\nem %s3 dias%s, Aldemar declara guerra e %sa região inteira é destruída.%s\n\nSua missão: tirar o Rei do trono %ssem violência%s e %ssem se revelar%s.\n\nVocê não luta — você move objetos e planta boatos.\nQuando a %sInstabilidade Social%s chegar a 100%%,\no próprio povo derruba o rei." % [y, e, r, e, r, e, r, e, c, e]},
+		{"title": "A MISSÃO", "text":
+			"O castelo fica ao norte. O portão é vigiado por %sBram, o guarda%s.\n\n%s1.%s Investigue os moradores — cada um tem fraquezas e segredos.\n%s2.%s Crie uma distração que tire Bram do posto.\n%s3.%s Cruce o portão. O povo fará o resto.\n\n%sCuidado:%s Osric vigia tudo de longe. Não seja visto.\n\n%s> Tutorial de campo disponível ao chegar. Boa sorte, estagiário.%s" % [y, e, c, e, c, e, c, e, r, e, c, e]},
 	]
 	return pages
 

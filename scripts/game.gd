@@ -129,6 +129,68 @@ const EVIDENCE_TYPES := [
 	"contradiction", "forged_letter",
 ]
 
+const MAX_WARNINGS := 2
+var warnings := 0
+
+## Gatilhos de efetividade: palavras-chave de sussurro e itens que causam MÁXIMO impacto por NPC.
+## NPCs com "protected" não podem ser confrontados/subornados.
+const NPC_TRIGGERS := {
+	"npc_king": {
+		"gossip_keys": ["rebelião", "revolta", "traição", "trono", "conspiração", "depor", "derrubar"],
+		"item_keys": ["sealed_letter", "king_dagger", "royal_ring", "royal_coin"],
+	},
+	"npc_baker": {
+		"gossip_keys": ["imposto", "taxa", "confisco", "padaria", "falir", "dívida", "tributo"],
+		"item_keys": ["royal_coin", "fake_coin", "sealed_letter"],
+	},
+	"npc_smith": {
+		"gossip_keys": ["guarda", "humilhação", "abuso", "maltrat", "ferro", "opressão", "soldado"],
+		"item_keys": ["rusty_sword", "king_dagger", "hammer"],
+	},
+	"npc_guard": {
+		"gossip_keys": ["motim", "revolta", "tumulto", "caos"],
+		"item_keys": [],
+		"protected": true,
+	},
+	"npc_guard2": {
+		"gossip_keys": ["soldo", "dinheiro", "pagamento", "salário", "riqueza", "suborno"],
+		"item_keys": ["royal_coin", "fake_coin", "rusty_sword", "king_dagger"],
+	},
+	"npc_priestess": {
+		"gossip_keys": ["divino", "sinal", "profanação", "sagrado", "visão", "profan", "heresia"],
+		"item_keys": ["relic", "rites_book"],
+	},
+	"npc_merchant": {
+		"gossip_keys": ["tarifa", "comércio", "mercado", "taxa", "lucro", "negócio", "contrabando"],
+		"item_keys": ["fake_coin", "royal_coin", "sealed_letter"],
+	},
+	"npc_orphan": {
+		"gossip_keys": ["gentil", "carinho", "amig", "cuidad", "ajud", "proteg"],
+		"item_keys": ["apple", "bread"],
+	},
+	"villager_farmer": {
+		"gossip_keys": ["decreto", "imposto", "colheita", "terra", "confisco", "taxa", "safra"],
+		"item_keys": ["sealed_letter", "royal_coin"],
+	},
+	"villager_woman": {
+		"gossip_keys": ["escândalo", "fofoca", "segredo", "rei", "corte", "absurdo", "traição"],
+		"item_keys": ["royal_ring", "royal_coin", "king_dagger"],
+	},
+	"villager_elder": {
+		"gossip_keys": [],
+		"item_keys": [],
+		"protected": true,
+	},
+	"villager_boy": {
+		"gossip_keys": ["brincar", "jogo", "aventura"],
+		"item_keys": ["apple"],
+	},
+	"villager_lady": {
+		"gossip_keys": ["nobreza", "confisco", "terra", "poder", "corte", "prestígio", "título"],
+		"item_keys": ["royal_ring", "royal_coin", "sealed_letter"],
+	},
+}
+
 var ACTION_DEFS := {
 	"observe": {
 		"name": "Observar",
@@ -436,6 +498,7 @@ func reset() -> void:
 	event_flags.clear()
 	active_events.clear()
 	_active_event_counter = 0
+	warnings = 0
 	_init_events()
 	_init_reputation()
 	for id in NPC_DEFS:

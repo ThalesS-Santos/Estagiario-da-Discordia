@@ -792,7 +792,7 @@ func show_name_entry() -> void:
 
 
 func start_game(new_game: bool) -> void:
-	Music.set_menu_active(false)
+	Music.play("day1")
 	_show_game_loading()
 	await get_tree().process_frame
 	_clear_menu_backdrop()
@@ -822,6 +822,7 @@ func _show_game_loading() -> void:
 
 
 func show_credits() -> void:
+	Music.play("credits")
 	var s := _new_screen()
 	_bg(s)
 	var chars := "01ABCDEF{}[]<>=;:/#$%"
@@ -942,7 +943,7 @@ func show_credits() -> void:
 
 
 func show_defeat() -> void:
-	Music.stop()
+	Music.play("defeat")
 	var s := _new_screen()
 	_bg(s)
 	var l := _lbl(s, "", 22, Color(1.0, 0.5, 0.45), Vector2(240, 200), 800.0)
@@ -963,7 +964,7 @@ func show_defeat() -> void:
 
 
 func show_victory() -> void:
-	Music.stop()
+	Music.stop(0.3)
 	var s := _new_screen()
 	_bg(s, Color(1, 1, 1))
 	_flash(1.0)
@@ -971,6 +972,7 @@ func show_victory() -> void:
 	create_tween().tween_property(bg, "color", Color.BLACK, 1.5)
 	if not await _wait(2.0):
 		return
+	Music.play("cinematic", 2.0)
 
 	# --- Silêncio pós-flash de memória, depois a mensagem final aparece ---
 	var y := Color(1.0, 0.85, 0.35)
@@ -1049,6 +1051,7 @@ func show_victory() -> void:
 	final_msg2.visible = false
 	final_msg3.visible = false
 	glitch.visible = false
+	Music.play("victory", 1.5)
 	_flash(0.3)
 
 	# Linha decorativa superior

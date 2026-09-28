@@ -299,29 +299,29 @@ func _build_suspicion_panel() -> void:
 
 
 func _build_opportunity_panel() -> void:
-	opportunity_panel = _9patch(tex_tooltip, [4, 4, 4, 4], Vector2(360, 64))
-	opportunity_panel.position = Vector2(460, 188)
+	opportunity_panel = _9patch(tex_tooltip, [4, 4, 4, 4], Vector2(420, 52))
+	opportunity_panel.position = Vector2((1280 - 420) / 2, 720 - 100)
 	opportunity_panel.visible = false
 	opportunity_panel.modulate = Color(1.0, 0.9, 0.3)
 	ui.add_child(opportunity_panel)
-	opportunity_label = _label("PORTÃO ABERTO!", 16, Color(1.0, 0.85, 0.1))
+	opportunity_label = _label("PORTÃO ABERTO!", 15, Color(1.0, 0.85, 0.1))
 	opportunity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	opportunity_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	opportunity_label.offset_top = 8
+	opportunity_label.offset_top = 7
 	opportunity_panel.add_child(opportunity_label)
-	opportunity_timer_label = _label("22s", 13, Color(1.0, 1.0, 0.8))
+	opportunity_timer_label = _label("22s", 12, Color(1.0, 1.0, 0.8))
 	opportunity_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	opportunity_timer_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	opportunity_timer_label.offset_bottom = -8
+	opportunity_timer_label.offset_bottom = -7
 	opportunity_panel.add_child(opportunity_timer_label)
 
 
 func show_gate_prompt() -> void:
 	if not _gate_prompt:
-		_gate_prompt = _label("Pressione  E  para abrir o portão", 18, Color(1.0, 0.85, 0.2))
+		_gate_prompt = _label("Pressione  E  para abrir o portão", 16, Color(1.0, 0.85, 0.2))
 		_gate_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_gate_prompt.position = Vector2(390, 270)
-		_gate_prompt.size = Vector2(500, 32)
+		_gate_prompt.position = Vector2(390, 720 - 132)
+		_gate_prompt.size = Vector2(500, 28)
 		_gate_prompt.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 		_gate_prompt.add_theme_constant_override("outline_size", 5)
 		ui.add_child(_gate_prompt)
@@ -747,57 +747,11 @@ func _scroll_event_log_to_end() -> void:
 
 # ---- cadeia causal ----------------------------------------------------------
 func _build_chain_panel() -> void:
-	chain_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(250, 180))
-	chain_panel.position = Vector2(1280 - 262, 200)
-	chain_panel.visible = false
-	chain_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(chain_panel)
-	var title := _label("CADEIA DE EVENTOS", 11, Color(1.0, 0.85, 0.35))
-	title.position = Vector2(10, 6)
-	chain_panel.add_child(title)
-	chain_vbox = VBoxContainer.new()
-	chain_vbox.position = Vector2(10, 24)
-	chain_vbox.add_theme_constant_override("separation", 4)
-	chain_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	chain_panel.add_child(chain_vbox)
-	# botão toggle (oculto até haver eventos)
-	chain_toggle_btn = _build_side_toggle_btn("EVENTOS", Vector2(1280 - 90, 200), true)
-	chain_toggle_btn.pressed.connect(_toggle_chain_panel)
-	chain_toggle_btn.visible = false
-	ui.add_child(chain_toggle_btn)
+	pass  # painel de cadeia de eventos removido
 
 
-func update_chain_panel(events: Array) -> void:
-	for c in chain_vbox.get_children():
-		c.queue_free()
-	if events.is_empty():
-		_set_chain_panel_visible(false)
-		chain_toggle_btn.visible = false
-		return
-	chain_toggle_btn.visible = true
-	for ev in events:
-		var done: bool = ev.get("done", false)
-		var active: bool = ev.get("active", false)
-		var icon := "✓" if done else ("▶" if active else "○")
-		var col := Color(0.4, 0.85, 0.4) if done else (Color(1.0, 0.85, 0.35) if active else Color(0.5, 0.6, 0.55))
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 4)
-		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var icon_l := _label(icon, 11, col)
-		icon_l.custom_minimum_size.x = 14
-		row.add_child(icon_l)
-		var name_l := _label(str(ev.get("label", "")), 11, col)
-		name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		name_l.custom_minimum_size = Vector2(200, 0)
-		name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(name_l)
-		chain_vbox.add_child(row)
-	var new_h := 28.0 + events.size() * 20.0
-	chain_panel.size.y = clampf(new_h, 52.0, 280.0)
-	# auto-show com auto-hide somente se o painel ainda não estava visível
-	if not chain_panel_visible:
-		_set_chain_panel_visible(true)
-		_autohide_chain(4.0)
+func update_chain_panel(_events: Array) -> void:
+	pass  # painel de cadeia de eventos removido
 
 
 # ---- API pública da missão -------------------------------------------------
@@ -853,22 +807,11 @@ func _set_mission_panel_visible(v: bool) -> void:
 
 
 func _toggle_chain_panel() -> void:
-	chain_panel_visible = not chain_panel_visible
-	_set_chain_panel_visible(chain_panel_visible)
+	pass
 
 
-func _set_chain_panel_visible(v: bool) -> void:
-	chain_panel_visible = v
-	if v:
-		chain_panel.modulate.a = 0.0
-		chain_panel.visible = true
-		create_tween().tween_property(chain_panel, "modulate:a", 1.0, 0.18)
-		chain_toggle_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 0.5))
-	else:
-		var tw := create_tween()
-		tw.tween_property(chain_panel, "modulate:a", 0.0, 0.15)
-		tw.tween_callback(func(): chain_panel.visible = false)
-		chain_toggle_btn.add_theme_color_override("font_color", Color(1.0, 0.82, 0.2, 0.85))
+func _set_chain_panel_visible(_v: bool) -> void:
+	pass
 
 
 func _autohide_mission(delay: float) -> void:
@@ -880,13 +823,8 @@ func _autohide_mission(delay: float) -> void:
 		_set_mission_panel_visible(false))
 
 
-func _autohide_chain(delay: float) -> void:
-	if _chain_autohide_timer != null:
-		return
-	_chain_autohide_timer = get_tree().create_timer(delay)
-	_chain_autohide_timer.timeout.connect(func():
-		_chain_autohide_timer = null
-		_set_chain_panel_visible(false))
+func _autohide_chain(_delay: float) -> void:
+	pass
 
 
 func show_mission_briefing() -> void:
@@ -974,6 +912,28 @@ func hide_opportunity() -> void:
 		_opportunity_tween.kill()
 		_opportunity_tween = null
 	opportunity_panel.visible = false
+
+
+func set_revolt_mode() -> void:
+	## Banner de revolução: esconde o botão de dia, exibe painel dramático pulsante.
+	end_btn.visible = false
+	if _opportunity_tween:
+		_opportunity_tween.kill()
+	# Expande e reposiciona o painel
+	var W := 700
+	opportunity_panel.custom_minimum_size = Vector2(W, 72)
+	opportunity_panel.size = Vector2(W, 72)
+	opportunity_panel.position = Vector2((1280 - W) / 2, 720 - 90)
+	opportunity_timer_label.visible = false
+	opportunity_label.text = "⚔  A REVOLTA COMEÇOU — ENTRE NO CASTELO!  ⚔"
+	opportunity_label.add_theme_font_size_override("font_size", 17)
+	opportunity_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.7))
+	opportunity_label.offset_top = 20
+	opportunity_panel.visible = true
+	# Pulso vermelho-laranja
+	_opportunity_tween = create_tween().set_loops()
+	_opportunity_tween.tween_property(opportunity_panel, "modulate", Color(2.0, 0.55, 0.15, 1.0), 0.45)
+	_opportunity_tween.tween_property(opportunity_panel, "modulate", Color(1.1, 0.28, 0.08, 1.0), 0.45)
 
 
 func show_clue_popup(lbl_text: String, desc_text: String) -> void:
@@ -1456,7 +1416,7 @@ func _build_status() -> void:
 	status_scroll.size = Vector2(696, 500)
 	status_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	status_scroll.mouse_filter = Control.MOUSE_FILTER_PASS
-	card.add_child(status_scroll)
+	_card.add_child(status_scroll)
 	status_vbox = VBoxContainer.new()
 	status_vbox.add_theme_constant_override("separation", 4)
 	status_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1597,7 +1557,7 @@ func _refresh_status() -> void:
 		row.add_child(rep_bar)
 		status_vbox.add_child(row)
 	# hint
-	var hint := _label("TAB para fechar", 11, Color(0.5, 0.65, 0.6, 0.5))
+	var hint := _label("TAB ou ESC para fechar", 11, Color(0.5, 0.65, 0.6, 0.5))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.custom_minimum_size = Vector2(670, 20)
 	status_vbox.add_child(hint)
@@ -1732,85 +1692,140 @@ func show_tutorial() -> void:
 
 
 func _tut_render() -> void:
-	# Remove tudo exceto o overlay dim
 	for c in tutorial_panel.get_children():
 		if c.name != "_tut_dim":
 			c.queue_free()
 
+	# [título, corpo, atalhos]
 	var steps: Array[Array] = [
-		["MOVIMENTO", "Use WASD para andar.\nShift mantém o passo furtivo — guardas são menos alertas.\n\nPasse o mouse sobre NPCs para ver o card de atributos.",
-		 "  WASD  mover\n  Shift  furtivo\n  TAB  painel de status\n  Z  desfazer"],
-		["PEGAR OBJETO", "Chegue perto de um objeto brilhante e clique nele.\nCada ação custa 1 PA — você tem 3 por dia.\n\nLeve o objeto para outro lugar e clique para soltá-lo.\nUm terminal aparece: escreva o boato que conecta o objeto ao caos.",
-		 "  Clique  pegar / soltar\n  Botão dir.  soltar sem narrativa\n  ESC  cancelar terminal"],
-		["SUSSURRAR", "Para convencer um NPC, posicione-se atrás ou ao lado dele.\nPressione E (ou clique no NPC com objeto) para sussurrar.\n\nEscreva o que quer que ele acredite. A IA decide como o NPC reage.",
-		 "  E  sussurrar (1 PA)\n  Fique atrás ou ao lado\n  Não na frente!"],
-		["OBJETIVO", "A barra de Instabilidade Social no canto superior esquerdo precisa chegar a 100%.\nQuando isso acontecer, o Rei Aldemar cai — vitória.\n\nVocê tem 3 dias. Se não chegar a 100% ao final do Dia 3: derrota.",
-		 "  3 dias\n  3 PA por dia\n  Sem violência"],
+		["MOVIMENTAÇÃO",
+		 "Use WASD (ou setas) para andar pela vila.\nSegure SHIFT para andar em modo FURTIVO — mais lento, mas guardas e NPCs te notam menos.\n\nA câmera segue você e espia levemente para onde o mouse aponta.",
+		 "WASD / Setas  mover\nShift  modo furtivo\nTAB  painel de status\nESC  pausar / fechar telas\nZ  desfazer última ação"],
+		["PONTOS DE AÇÃO (PA)",
+		 "Você tem 3 PA por dia. Cada ação gasta PA:\n\n  • Pegar um objeto: 1 PA\n  • Soltar com boato: 1 PA   (total: 2 PA)\n  • Sussurrar para NPC: 1 PA\n\nAo terminar seus PAs, clique em ENCERRAR DIA para avançar.\nUse Z para desfazer a última ação e recuperar o PA gasto.",
+		 "3 PA por dia\nPegar = 1 PA\nSoltar = 1 PA\nSussurrar = 1 PA\nZ  desfaz"],
+		["MANIPULAR OBJETOS",
+		 "Objetos brilhantes espalhados pela vila podem ser carregados.\n\nClique num objeto próximo para pegá-lo (1 PA).\nLeve-o para outro lugar e clique novamente para soltá-lo (1 PA).\n\nUm TERMINAL aparece: escreva o boato que os moradores vão associar ao objeto. A IA do Gemini processa e decide o impacto na Instabilidade Social.",
+		 "Clique esq.  pegar / soltar\nBotão dir.  soltar sem boato\nESC  cancelar terminal\nENTER  confirmar boato"],
+		["SUSSURRAR BOATOS",
+		 "Você pode convencer NPCs diretamente falando com eles.\n\nPositione-se ATRÁS ou AO LADO do NPC (não na frente!).\nPressione E para sussurrar (1 PA) — um terminal abre.\nEscreva o que quer que ele acredite ou espalhe.\n\nA IA decide como o NPC reage: medo, raiva, lealdade e credibilidade mudam. Sussurros falsos ou absurdos têm menos efeito.",
+		 "E  sussurrar (1 PA)\nFique atrás ou ao lado\nNão na frente!\nESC  cancelar\nENTER  confirmar"],
+		["INVESTIGAR NPCs",
+		 "Clique com o botão DIREITO em qualquer NPC para abrir o menu de ações:\n\n  • Observar — revela dicas sobre a personalidade e fraquezas do NPC (grátis)\n  • Escutar — ouve o que ele está falando, pode gerar pistas (grátis)\n  • Confrontar — usa evidências para abalar a lealdade dele (1 PA)\n  • Pedir Ajuda — resultado depende de quem é o NPC e do nível de Instabilidade (1 PA)\n\nPasse o mouse sobre um NPC para ver o card com os atributos dele.",
+		 "Clique dir.  menu de ações\nObservar  dica grátis\nEscutar  dica grátis\nPedir Ajuda  varia por NPC\nTAB  todos os status"],
+		["OBJETIVO",
+		 "A barra de INSTABILIDADE SOCIAL no canto superior direito precisa chegar a 100%.\nQuando isso acontecer, o próprio povo derruba o Rei Aldemar — vitória!\n\nVocê tem 3 dias. Se não chegar a 100% ao final do Dia 3: derrota.\n\nDica: combine objetos simbólicos (armas reais, itens sagrados) com boatos bem elaborados para maximizar o impacto. Fale com os aldeões mais instáveis primeiro.",
+		 "3 dias no total\n3 PA por dia\nInstabilidade = 100%  vitória\nSem violência!\nBoatos + objetos = mais impacto"],
 	]
 
 	var s: Array = steps[tut_step]
-	# Painel centralizado
-	var pc := _9patch(tex_panel, [4, 4, 4, 4], Vector2(680, 0))
-	pc.position = Vector2(300, 140)
+	var total := steps.size()
+
+	var pc := _9patch(tex_panel, [4, 4, 4, 4], Vector2(760, 0))
 	pc.modulate.a = 0.0
 	pc.z_index = 31
 
 	var outer := MarginContainer.new()
-	outer.add_theme_constant_override("margin_left", 20)
-	outer.add_theme_constant_override("margin_top", 14)
-	outer.add_theme_constant_override("margin_right", 20)
-	outer.add_theme_constant_override("margin_bottom", 14)
+	outer.add_theme_constant_override("margin_left", 24)
+	outer.add_theme_constant_override("margin_top", 16)
+	outer.add_theme_constant_override("margin_right", 24)
+	outer.add_theme_constant_override("margin_bottom", 16)
 	pc.add_child(outer)
 
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 8)
+	v.add_theme_constant_override("separation", 10)
 	outer.add_child(v)
 
-	# Cabeçalho com número e título
+	# Cabeçalho
 	var hbox := HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 10)
+	hbox.add_theme_constant_override("separation", 12)
 	v.add_child(hbox)
-	var step_num := _label("%d/%d" % [tut_step + 1, steps.size()], 11, Color(0.55, 0.65, 0.60))
-	step_num.custom_minimum_size.x = 28
-	hbox.add_child(step_num)
-	hbox.add_child(_label(s[0], 18, Color(1.0, 0.85, 0.35)))
+	var step_lbl := _label("%d / %d" % [tut_step + 1, total], 11, Color(0.5, 0.65, 0.58))
+	step_lbl.custom_minimum_size.x = 38
+	step_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(step_lbl)
+	hbox.add_child(_label(s[0], 19, Color(1.0, 0.85, 0.35)))
+	# barra de progresso simples
+	var prog_row := HBoxContainer.new()
+	prog_row.add_theme_constant_override("separation", 4)
+	prog_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(prog_row)
+	var prog_spacer := Control.new()
+	prog_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	prog_row.add_child(prog_spacer)
+	for pi in total:
+		var dot := ColorRect.new()
+		dot.custom_minimum_size = Vector2(10, 10)
+		dot.color = Color(1.0, 0.82, 0.2) if pi == tut_step else Color(0.3, 0.4, 0.35)
+		prog_row.add_child(dot)
 
-	# Linha separadora
+	# Separador
 	var sep := ColorRect.new()
-	sep.color = Color(0.3, 0.4, 0.35, 0.7)
-	sep.custom_minimum_size = Vector2(640, 1)
+	sep.color = Color(0.28, 0.38, 0.32, 0.8)
+	sep.custom_minimum_size = Vector2(0, 1)
 	v.add_child(sep)
 
-	# Corpo + atalhos lado a lado
+	# Corpo + atalhos
 	var cols := HBoxContainer.new()
-	cols.add_theme_constant_override("separation", 20)
+	cols.add_theme_constant_override("separation", 18)
 	v.add_child(cols)
 
-	var body := _label(s[1], 15, Color(0.90, 1.0, 0.92))
+	var body := _label(s[1], 14, Color(0.90, 1.0, 0.93))
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	body.custom_minimum_size.x = 440
+	body.custom_minimum_size.x = 480
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_child(body)
 
+	var hint_wrap := VBoxContainer.new()
+	hint_wrap.custom_minimum_size.x = 190
+	hint_wrap.add_theme_constant_override("separation", 0)
+	cols.add_child(hint_wrap)
+	var hint_header := _label("ATALHOS", 9, Color(0.5, 0.65, 0.58))
+	hint_wrap.add_child(hint_header)
 	var hint_bg := ColorRect.new()
-	hint_bg.color = Color(0.06, 0.10, 0.12, 0.80)
-	hint_bg.custom_minimum_size = Vector2(160, 0)
-	cols.add_child(hint_bg)
-	var hint_lbl := _label(s[2], 12, Color(0.65, 0.85, 0.75))
-	hint_lbl.position = Vector2(8, 8)
+	hint_bg.color = Color(0.05, 0.09, 0.11, 0.85)
+	hint_bg.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hint_wrap.add_child(hint_bg)
+	var hint_lbl := _label(s[2], 12, Color(0.70, 0.90, 0.78))
+	hint_lbl.position = Vector2(8, 6)
+	hint_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint_lbl.custom_minimum_size.x = 174
 	hint_bg.add_child(hint_lbl)
 
-	# Botão de avançar
-	var b := Button.new()
-	b.text = "PRÓXIMO  ›" if tut_step < steps.size() - 1 else "ENTENDIDO — COMEÇAR"
-	b.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	b.pressed.connect(func():
+	# Botão
+	var btn_row := HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_END
+	v.add_child(btn_row)
+	if tut_step > 0:
+		var back := Button.new()
+		back.text = "‹ ANTERIOR"
+		back.pressed.connect(func():
+			Sfx.play("bip")
+			tut_step -= 1
+			_tut_render())
+		back.mouse_entered.connect(func(): Sfx.play("bip"))
+		var sb_back := StyleBoxTexture.new()
+		sb_back.texture = tex_button
+		sb_back.region_rect = Rect2(0, 0, 32, 14)
+		_set_9slice_margins(sb_back, 4)
+		back.add_theme_stylebox_override("normal", sb_back)
+		back.add_theme_stylebox_override("hover", sb_back)
+		back.add_theme_stylebox_override("focus", sb_back)
+		back.add_theme_font_size_override("font_size", 13)
+		back.add_theme_color_override("font_color", Color(0.65, 0.85, 0.75))
+		back.custom_minimum_size = Vector2(130, 34)
+		btn_row.add_child(back)
+	var fwd := Button.new()
+	fwd.text = "PRÓXIMO  ›" if tut_step < total - 1 else "ENTENDIDO — JOGAR!"
+	fwd.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	fwd.pressed.connect(func():
 		Sfx.play("confirm")
 		tut_step += 1
-		if tut_step >= steps.size():
+		if tut_step >= total:
 			tutorial_panel.queue_free()
 		else:
 			_tut_render())
-	b.mouse_entered.connect(func(): Sfx.play("bip"))
+	fwd.mouse_entered.connect(func(): Sfx.play("bip"))
 	var sb_n := StyleBoxTexture.new()
 	sb_n.texture = tex_button
 	sb_n.region_rect = Rect2(0, 0, 32, 14)
@@ -1819,18 +1834,19 @@ func _tut_render() -> void:
 	sb_h.texture = tex_button
 	sb_h.region_rect = Rect2(0, 14, 32, 14)
 	_set_9slice_margins(sb_h, 4)
-	b.add_theme_stylebox_override("normal", sb_n)
-	b.add_theme_stylebox_override("hover", sb_h)
-	b.add_theme_font_size_override("font_size", 14)
-	b.add_theme_color_override("font_color", Color(0.85, 1.0, 0.9))
-	b.add_theme_color_override("font_hover_color", Color(1.0, 0.85, 0.35))
-	b.custom_minimum_size = Vector2(200, 36)
-	v.add_child(b)
+	fwd.add_theme_stylebox_override("normal", sb_n)
+	fwd.add_theme_stylebox_override("hover", sb_h)
+	fwd.add_theme_stylebox_override("focus", sb_n)
+	fwd.add_theme_font_size_override("font_size", 14)
+	fwd.add_theme_color_override("font_color", Color(0.85, 1.0, 0.9))
+	fwd.add_theme_color_override("font_hover_color", Color(1.0, 0.85, 0.35))
+	fwd.custom_minimum_size = Vector2(210, 36)
+	btn_row.add_child(fwd)
 
 	tutorial_panel.add_child(pc)
 	_fit_tut_panel(pc, outer)
 	_fit_tut_panel.call_deferred(pc, outer)
-	create_tween().tween_property(pc, "modulate:a", 1.0, 0.25)
+	create_tween().tween_property(pc, "modulate:a", 1.0, 0.22)
 
 
 func _fit_tut_panel(pc: Control, content: Control) -> void:
@@ -1983,10 +1999,14 @@ func _input(event: InputEvent) -> void:
 			if terminal.visible:
 				close_terminal()
 				world.terminal_cancel()
+			elif status_panel and status_panel.visible:
+				status_panel.visible = false
 			elif action_panel and action_panel.visible:
 				hide_action_menu()
+			elif confront_panel and confront_panel.visible:
+				hide_confrontation()
 			elif tutorial_panel and is_instance_valid(tutorial_panel) and not tutorial_panel.is_queued_for_deletion():
-				pass
+				tutorial_panel.queue_free()
 			else:
 				toggle_pause()
 			get_viewport().set_input_as_handled()

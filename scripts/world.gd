@@ -72,6 +72,10 @@ var _active_event_queue: Array = []
 var _last_action_effect := true  # setado por _apply_action_specific, lido por _did_action_succeed
 var _tension_t := 0.0
 var _phase_before_confrontation: int = Phase.ACTION
+var exposure_count := 0       # quantas vezes flagrado com item suspeito (2 = game over)
+var _osric_alerted := false   # Osric já alertou Bram neste ciclo (evita spam)
+var _alert_mode := false      # Bram em alerta extra após Osric reportar
+var _alert_mode_t := 0.0
 var village: Village
 var villagers: Array = []
 var overlay: Overlay
@@ -275,6 +279,9 @@ func _on_caos_gerado(data: Dictionary) -> void:
 	ai_waiting = false
 	pending_gossip.clear()
 	hud.set_loading(false)
+	# Capturar alvo e item antes do commit (commit limpa as referências)
+	var _trigger_npc_id := gossip_npc.id if gossip_npc else ""
+	var _trigger_item_id := held.id if held else ""
 	# Commit inventory and AP only after a valid response; errors leave them intact.
 	if gossip_npc:
 		_commit_gossip(narrative)
@@ -317,18 +324,26 @@ func _on_caos_gerado(data: Dictionary) -> void:
 				str(ev.get("description", "")),
 				float(ev.get("strength", 20)) * Game.get_difficulty().evidence_weight,
 				"", "", "", false)
+	# Multiplicador de efetividade: boato/item que bate com o gatilho do NPC = muito mais impacto
+	var _raw_delta := float(data.instability_delta)
+	var _trigger_mult := _calc_trigger_multiplier(_trigger_npc_id, _trigger_item_id, narrative)
+	_raw_delta *= _trigger_mult
 	# Softcap diário: dia 1 máx +25, dia 2 máx +40, dia 3 sem limite.
-	# Impede ganhar no dia 1 escrevendo o boato mais poderoso logo de cara.
 	var _daily_caps := {1: 25.0, 2: 40.0, 3: 999.0}
 	var _daily_cap: float = _daily_caps.get(Game.day, 999.0)
 	var _remaining_cap := maxf(_daily_cap - _instability_added_today, 0.0)
-	var _delta := minf(float(data.instability_delta), _remaining_cap)
+	var _delta := minf(_raw_delta, _remaining_cap)
 	_instability_added_today += maxf(_delta, 0.0)
-	if _delta < float(data.instability_delta) and float(data.instability_delta) > 0.0:
+	if _delta < _raw_delta and _raw_delta > 0.0:
 		hud.toast("Os moradores ainda não estão convencidos o suficiente...", 3.0)
 	# This signal drives the existing HUD tween. Never add the delta again on end-day.
 	Game.add_instability(_delta)
-	hud.toast("Instabilidade %+d%%" % int(data.instability_delta), 2.5)
+	if _trigger_mult >= 2.0:
+		hud.toast("Sussurro certeiro! Instabilidade %+d%%" % int(_delta), 3.5)
+	elif _trigger_mult <= 0.3:
+		hud.toast("O boato não fez muito efeito... Instabilidade %+d%%" % int(_delta), 3.0)
+	else:
+		hud.toast("Instabilidade %+d%%" % int(_delta), 2.5)
 	_parse_ai_active_events(data)
 	_evaluate_chain_events()
 	sim_events.clear()
@@ -339,6 +354,33 @@ func _on_caos_gerado(data: Dictionary) -> void:
 	_sim_clock_to = minf(clock + 3.0, 18.0)
 	sim_running = true
 	Sfx.play("tension")
+
+
+func _calc_trigger_multiplier(npc_id: String, item_id: String, narrative: String) -> float:
+	if npc_id == "" and item_id == "":
+		return 1.0
+	var txt := narrative.to_lower()
+	# Sussurro para um NPC: verificar palavras-chave
+	if npc_id != "":
+		var triggers: Dictionary = Game.NPC_TRIGGERS.get(npc_id, {})
+		var keys: Array = triggers.get("gossip_keys", [])
+		if keys.is_empty():
+			return 0.15
+		for k: String in keys:
+			if k.to_lower() in txt:
+				return 2.5
+		return 0.15
+	# Objeto solto: verificar se o item está na lista efetiva de algum NPC próximo
+	if item_id != "":
+		var best := 0.3
+		for tid in Game.NPC_TRIGGERS:
+			var t_data: Dictionary = Game.NPC_TRIGGERS[tid]
+			var eff_items: Array = t_data.get("item_keys", [])
+			if item_id in eff_items:
+				best = 2.0
+				break
+		return best
+	return 1.0
 
 
 func _local_ai_result() -> Dictionary:
@@ -578,6 +620,10 @@ func _start_day() -> void:
 	follow = null
 	_shadowing_npc = null
 	actions_today.clear()
+	exposure_count = 0
+	_osric_alerted = false
+	_alert_mode = false
+	_alert_mode_t = 0.0
 	Game.reset_ap()
 	for id in npcs:
 		var n: NPC = npcs[id]
@@ -628,6 +674,7 @@ func _start_day() -> void:
 	_instability_added_today = 0.0
 	_panic_tick = randf_range(2.5, 5.0)
 	_snapshot()
+	Music.set_day(Game.day)
 	hud.new_day()
 	Game.world_checkpoint = _checkpoint()
 	Game.save_game()
@@ -832,7 +879,11 @@ func _open_action_menu(target_npc: NPC = null, target_obj: WorldObject = null) -
 	var actions: Array = []
 	var free_ap := phase == Phase.ACTIVE_EVENT
 	if target_npc:
-		var npc_actions := ["observe", "listen", "gossip", "follow", "confront", "protect", "ask_help"]
+		var has_evidence := not Game.get_evidence_about(target_npc.id).is_empty()
+		var npc_actions := ["observe", "listen", "gossip", "ask_help"]
+		if has_evidence:
+			npc_actions.append("confront")
+			npc_actions.append("protect")
 		for action in Game.get_available_actions(false, true, free_ap):
 			if npc_actions.has(action.id) and (phase == Phase.ACTION or action.id != "gossip"):
 				actions.append(action)
@@ -1419,6 +1470,8 @@ func _start_revolt() -> void:
 	_revolt_active = true
 	crisis = true
 	hud.toast("A INSTABILIDADE CHEGOU AO LIMITE! O povo pega em armas!", 5.0)
+	hud.set_revolt_mode()
+	Music.trigger_revolt()
 	Sfx.play("alarm")
 	clock = 21.0
 	var tw := create_tween()
@@ -1485,6 +1538,8 @@ func _victory_sequence() -> void:
 		# Jogador venceu pela cadeia de missão sem ter passado por 100% de instabilidade antes —
 		# toca aqui a abertura da revolta que normalmente já teria acontecido.
 		_revolt_active = true
+		hud.set_revolt_mode()
+		Music.trigger_revolt()
 		Sfx.play("alarm")
 		clock = 21.0
 		var tw0 := create_tween()
@@ -1635,6 +1690,7 @@ func _victory_sequence() -> void:
 	king.set_physics_process(false)
 
 	# ======================== CONCLUSÃO CINEMATOGRÁFICA ========================
+	Music.play("victory", 2.0)
 	await _conclusion_sequence(revolt_npcs)
 
 
@@ -1918,6 +1974,7 @@ func _conclusion_sequence(revolt_npcs: Array) -> void:
 		_concl_nodes.append(d_spr)
 
 	# ---- PARTE 2: A Figura Misteriosa (inferior esquerda, abaixo do templo) ----
+	Music.play("cinematic", 2.5)
 	cam_limit_bottom = 1100.0
 	# Área limpa abaixo do templo: centro em (200, 830)
 	var scene_center := Vector2(200, 830)
@@ -2337,6 +2394,10 @@ func _process(delta: float) -> void:
 			_tension_t = 0.85
 	else:
 		_tension_t = 0.0
+	if _alert_mode:
+		_alert_mode_t -= delta
+		if _alert_mode_t <= 0.0:
+			_alert_mode = false
 	if mission and (phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT):
 		mission.tick(delta)
 	if phase == Phase.ACTIVE_EVENT:
@@ -2430,7 +2491,8 @@ func _update_suspicion(delta: float) -> void:
 		if not npc.visible or not is_instance_valid(npc):
 			continue
 		var dist := npc.position.distance_to(player.global_position)
-		if dist > _SUSPICION_SIGHT_RADIUS:
+		var sight_r := _SUSPICION_SIGHT_RADIUS * (1.4 if _alert_mode and npc.id == "npc_guard" else 1.0)
+		if dist > sight_r:
 			npc._suspicion_decay_paused = false
 			continue
 
@@ -2454,9 +2516,9 @@ func _update_suspicion(delta: float) -> void:
 
 		if base_rate > 0.0:
 			var rep_mod: Dictionary = Game.reputation_modifier(npc.id)
-			# Guardas ficam mais alertas conforme a instabilidade sobe: +50% a 50%, +100% a 100%
 			var instab_mult := 1.0 + clampf((Game.instability - 20.0) / 80.0, 0.0, 1.0)
-			npc.add_suspicion(base_rate * exposure * susp_rate * float(rep_mod.suspicion_mult) * delta * instab_mult)
+			var alert_mult := 1.5 if (_alert_mode and npc.id == "npc_guard") else 1.0
+			npc.add_suspicion(base_rate * exposure * susp_rate * float(rep_mod.suspicion_mult) * delta * instab_mult * alert_mult)
 
 		# confronto: NPC aborda o jogador (evita repetição no mesmo ciclo)
 		if npc.suspicion_state == NPC.SuspicionState.CONFRONTING and not npc.moving and not npc.pursuing:
@@ -2500,15 +2562,22 @@ func _on_npc_confronts(npc: NPC) -> void:
 func _on_vision_cone_caught(npc: NPC, _target: Node2D) -> void:
 	if phase != Phase.ACTION and phase != Phase.ACTIVE_EVENT:
 		return
+	if held != null and _is_item_freely_takeable(held):
+		return
+	exposure_count += 1
 	hud.flash_danger()
 	Sfx.play("shout")
+	if exposure_count >= 2:
+		_trigger_caught_game_over(npc)
+		return
 	npc.start_pursuit(player, 15.0)
 	phase = Phase.PURSUIT
 	hud.set_pursuit_mode(true)
-	# Perde 1 PA como penalidade de ser visto.
 	Game.spend_ap(1)
-	hud.toast("Flagrante! Você perdeu 1 Ponto de Ação.", 3.0)
-	# Devolve o item ao local original se o jogador o carrega.
+	hud.toast("⚠ FLAGRADO! Você foi visto! (%d/2 — na próxima a linha temporal é apagada)" % exposure_count, 5.0)
+	hud.add_event_log("Flagrante %d/2: %s viu o Estagiário com item suspeito." % [exposure_count, str(npc.def.get("name", ""))])
+	Game.event_flags["player_caught"] = true
+	Game.add_instability(-10.0)
 	if held != null:
 		var obj := held
 		var return_pos := held_from if held_from != Vector2.ZERO else \
@@ -2517,6 +2586,98 @@ func _on_vision_cone_caught(npc: NPC, _target: Node2D) -> void:
 		obj.held = false
 		obj.global_position = return_pos
 		player.forget_held()
+
+
+func _trigger_caught_game_over(npc: NPC) -> void:
+	if phase == Phase.ENDED:
+		return
+	phase = Phase.ENDED
+	Game.event_flags["player_caught"] = true
+	npc.say("Você de novo! A linha temporal está comprometida!", 5.0)
+	npc.show_emote("!", 3.0)
+	shake = 8.0
+	player.input_enabled = false
+	player.set_emotion("PANIC")
+	Sfx.play("thud")
+	hud.flash_danger()
+	if held != null:
+		held.held = false
+		held = null
+		player.forget_held()
+	await get_tree().create_timer(1.8).timeout
+	hud.toast("LINHA TEMPORAL APAGADA — mudanças demais na história!", 0.0)
+	await get_tree().create_timer(3.0).timeout
+	defeat.emit()
+
+
+## NPC protegido (Bram/Ancião) retalia: o jogador perde 1 PA e recebe um aviso.
+func _on_protected_npc_retaliation(npc: NPC, _action_id: String) -> void:
+	Game.warnings += 1
+	Game.spend_ap(1)
+	shake = 5.0
+	Sfx.play("shout")
+	player.set_emotion("PANIC")
+	npc.show_emote("!", 3.0)
+	hud.flash_danger()
+	if npc.id == "npc_guard" or npc.id == "npc_guard2":
+		npc.say("Você está me desafiando?! Guarda!", 4.0)
+	else:
+		npc.say("Insolente! Não ouse tentar isso comigo!", 4.0)
+	hud.add_event_log("%s retaliou! Aviso %d/%d." % [str(npc.def.get("name", "")), Game.warnings, Game.MAX_WARNINGS])
+	if Game.warnings >= Game.MAX_WARNINGS:
+		hud.toast("EXPULSO DA LINHA TEMPORAL — provocou demais!", 0.0)
+		phase = Phase.ENDED
+		player.input_enabled = false
+		get_tree().create_timer(2.5).timeout.connect(func(): defeat.emit())
+	else:
+		hud.toast("⚠ %s não tolera isso! Aviso %d/%d — na próxima será expulso!" % [
+			str(npc.def.get("name", "")), Game.warnings, Game.MAX_WARNINGS], 5.0)
+		npc.add_suspicion(40.0)
+
+
+## Osric avistou o jogador com item suspeito e vai alertar Bram.
+func _on_osric_reports_to_guard(osric: NPC, _target: Node2D) -> void:
+	if phase != Phase.ACTION and phase != Phase.ACTIVE_EVENT:
+		return
+	if held != null and _is_item_freely_takeable(held):
+		return
+	if _osric_alerted:
+		return
+	_osric_alerted = true
+	get_tree().create_timer(30.0).timeout.connect(func(): _osric_alerted = false)
+	var bram: NPC = npcs.get("npc_guard")
+	if bram and not bram.pursuing:
+		osric.walk_to(bram.global_position)
+		bram.add_suspicion(35.0)
+		_alert_mode = true
+		_alert_mode_t = 30.0
+		await get_tree().create_timer(1.0).timeout
+		if is_instance_valid(bram):
+			bram.say("O ancião está me sinalizando algo...", 3.0)
+			bram.show_emote("?", 2.0)
+	hud.flash_danger()
+	hud.toast("Osric notou algo suspeito e foi alertar Bram! (cone de Bram ampliado por 30s)", 5.0)
+	hud.add_event_log("Osric alertou Bram — o guarda está em modo de alerta.")
+
+
+## Retorna true quando o item pode ser pego livremente (sem ativar detecção).
+func _is_item_freely_takeable(obj: WorldObject) -> bool:
+	var tags: Array = obj.def.get("tags", [])
+	# Ferreiro aliado libera martelo e espada
+	if "arma" in tags and obj.id in ["hammer", "rusty_sword"]:
+		if Game.event_flags.get("smith_allied", false):
+			return true
+		if Game.instability >= 60.0:
+			return true
+	# Alta instabilidade ou guarda distraído libera a chave dourada
+	if obj.id == "gold_key":
+		if Game.instability >= 70.0 or Game.event_flags.get("guard_distracted", false):
+			return true
+	# Alta instabilidade libera relíquias sagradas
+	if "sagrado" in tags:
+		if Game.instability >= 65.0:
+			return true
+	return false
 
 
 func _on_npc_catches_player(npc: NPC) -> void:
@@ -2669,6 +2830,12 @@ func execute_action(action_id: String, target_npc: NPC = null, target_obj: World
 		Sfx.play("error")
 		return false
 	var def: Dictionary = Game.ACTION_DEFS[action_id]
+	# Proteção: Bram e Ancião não podem ser confrontados/subornados/incriminados
+	if target_npc and action_id in ["confront", "ask_help", "incriminate"]:
+		var t_triggers: Dictionary = Game.NPC_TRIGGERS.get(target_npc.id, {})
+		if t_triggers.get("protected", false):
+			_on_protected_npc_retaliation(target_npc, action_id)
+			return false
 	var cost: int = def.cost
 	if cost > 0 and not in_active_event:
 		Game.spend_ap(cost)
@@ -2736,13 +2903,21 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 			if target_npc:
 				hud.show_npc(target_npc, true)
 				player.set_emotion("SUSPICIOUS")
-				var _watch_t := 3.0
-				if mission:
-					if target_npc.id == "npc_guard":
-						mission.notify_object_picked("observe_guard")
+				if mission and mission.has_method("notify_npc_observed"):
+					mission.notify_npc_observed(target_npc.id)
+				var hint := _observe_hint(target_npc.id)
+				hud.toast("👁 %s" % hint, 6.0)
+				hud.add_event_log("Observou %s: %s" % [str(target_npc.def.get("name", "")), hint])
 		"listen":
 			if target_npc:
 				player.set_emotion("SUSPICIOUS")
+				if mission and mission.has_method("notify_npc_listened"):
+					mission.notify_npc_listened(target_npc.id)
+				if target_npc.id == "villager_elder":
+					_osric_oracle(target_npc)
+				var hint := _listen_hint(target_npc.id)
+				hud.toast("👂 %s" % hint, 6.0)
+				hud.add_event_log("Escutou %s: %s" % [str(target_npc.def.get("name", "")), hint])
 				var saved: Dictionary = Game.npc_state.get(target_npc.id, {})
 				var memories: Array = saved.get("memories", [])
 				if not memories.is_empty():
@@ -2750,9 +2925,6 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 					Game.create_evidence("overheard", loc,
 						"Ouviu %s dizer: \"%s\"" % [str(target_npc.def.get("name", "")), last.left(50)],
 						10.0, "", "", target_npc.id)
-					hud.toast("Você ouviu algo útil de %s." % str(target_npc.def.get("name", "")), 3.0)
-				else:
-					hud.toast("%s não disse nada interessante." % str(target_npc.def.get("name", "")), 2.5)
 		"gossip":
 			pass # já tratado pelo sistema existente de sussurro
 		"plant_object":
@@ -2850,20 +3022,24 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 				return
 		"ask_help":
 			if target_npc:
-				var loyalty: float = float(Game.npc_state.get(target_npc.id, {}).get("loyalty", 100))
-				if loyalty < 40:
-					target_npc.say("Vou te ajudar.", 3.0)
+				var result := _evaluate_ask_help(target_npc)
+				if result.accepts:
+					target_npc.say(result.accept_line, 3.0)
 					target_npc.show_emote("<3", 2.0)
 					Game.bump(target_npc.id, "loyalty", -10.0)
-					hud.toast("%s está do seu lado." % str(target_npc.def.get("name", "")), 3.0)
+					Game.bump(target_npc.id, "fear", -5.0)
+					hud.toast("%s aceita ajudar!" % str(target_npc.def.get("name", "")), 3.5)
+					hud.add_event_log("%s aceita ajudar o Estagiário." % str(target_npc.def.get("name", "")))
+					if target_npc.id == "npc_smith":
+						Game.event_flags["smith_allied"] = true
+						hud.add_event_log("Ferreiro aliado — martelo e espada podem ser pegos livremente.")
 					_last_action_effect = true
 				else:
-					# Recusa: o NPC fica com mais suspeita e pode denunciar
-					target_npc.say("Não tenho o que falar com você.", 3.0)
+					target_npc.say(result.refuse_line, 3.0)
 					target_npc.show_emote("!", 2.0)
-					target_npc.add_suspicion(15.0)
-					Game.bump(target_npc.id, "anger", 10.0)
-					hud.toast("%s recusou e ficou desconfiado." % str(target_npc.def.get("name", "")), 3.5)
+					target_npc.add_suspicion(result.suspicion_penalty)
+					Game.bump(target_npc.id, "anger", result.anger_penalty)
+					hud.toast("%s recusou. %s" % [str(target_npc.def.get("name", "")), result.toast], 4.0)
 					_last_action_effect = false
 		"destroy_evidence":
 			var loc_ev := Game.get_evidence_at(loc)
@@ -2884,6 +3060,301 @@ func _apply_action_specific(action_id: String, target_npc: NPC, target_obj: Worl
 			for npc: NPC in npcs.values() + villagers:
 				if npc.pursuing:
 					npc.pursue_lost_timer += 1.5
+
+
+## Osric revela o segredo do NPC com maior lealdade ao Rei no momento.
+func _osric_oracle(osric: NPC) -> void:
+	var best_loyal_id := ""
+	var best_loyalty := 0.0
+	for nid in Game.NPC_DEFS:
+		if nid in ["npc_king", "npc_guard", "npc_guard2"]:
+			continue
+		var st: Dictionary = Game.npc_state.get(nid, {})
+		var loy := float(st.get("loyalty", 0))
+		if loy > best_loyalty:
+			best_loyalty = loy
+			best_loyal_id = nid
+	var npc_name := str(Game.NPC_DEFS.get(best_loyal_id, Game.VILLAGER_DEFS.get(best_loyal_id, {})).get("name", "alguém"))
+	var secret := _osric_secret_for(best_loyal_id)
+	osric.say("...%s" % secret.short, 4.5)
+	osric.show_emote("...", 3.0)
+	hud.toast("🔮 Osric murmura: %s" % secret.long, 7.0)
+	hud.add_event_log("Oráculo de Osric sobre %s: %s" % [npc_name, secret.long])
+	Game.create_evidence("overheard",
+		Game.nearest_location(osric.global_position),
+		"Osric revelou: %s" % secret.long, 18.0, "", best_loyal_id, "villager_elder")
+	Game.add_memory("villager_elder", "Revelou segredo sobre %s ao Estagiário." % npc_name)
+
+
+func _osric_secret_for(npc_id: String) -> Dictionary:
+	match npc_id:
+		"npc_baker":
+			return {"short": "O pão tem história...", "long": "João esconde dívidas com o Rei. Pressione-o com boatos sobre impostos."}
+		"npc_smith":
+			return {"short": "Aquele martelo viu coisas...", "long": "Marten foi humilhado pelo Rei diante de todos. A raiva dele está borbulhando."}
+		"npc_priestess":
+			return {"short": "O templo chora por dentro...", "long": "Mira sabe de um segredo sombrio do Rei. Uma relíquia desaparecida a moveria."}
+		"npc_merchant":
+			return {"short": "O mercador calcula mais do que vende...", "long": "Valdo guarda documentos comprometedores sobre o Rei. Ele vende a quem pagar mais."}
+		"npc_orphan":
+			return {"short": "A menina viu tudo...", "long": "Lila presenciou algo que o Rei quer esconder. Ela conta para quem a tratar bem."}
+		"villager_farmer":
+			return {"short": "A terra não mente...", "long": "Tobias sabe de um decreto secreto que arruinará os camponeses. Um boato basta para revoltá-lo."}
+		"villager_woman":
+			return {"short": "Helga ouviu o que não devia...", "long": "Helga ouviu o Rei planejando aumentar tributos. Ela guardou isso para si — até agora."}
+		"villager_lady":
+			return {"short": "A nobreza tem seus preços...", "long": "Isolde sabe que o Rei planeja confiscar terras nobres. Ela esperava uma chance de agir."}
+		"villager_boy":
+			return {"short": "O menino brinca perto demais do castelo...", "long": "Pip achou algo perto do portão que não devia estar ali. Pergunte a ele diretamente."}
+		_:
+			return {"short": "Todos têm segredos aqui...", "long": "Observe os que mais sorriem — são os que mais temem."}
+
+
+func _observe_hint(npc_id: String) -> String:
+	var d := clampi(Game.day - 1, 0, 2)
+	var hints := {
+		"npc_king": [
+			"O Rei examina nervosamente um selo real. Objetos com brasão real plantados em lugares errados o deixariam paranóico.",
+			"O Rei esconde documentos debaixo do trono. Uma carta lacrada falsificada poderia incriminá-lo.",
+			"O Rei afasta qualquer um que se aproxima. A adaga real fora do lugar seria prova de conspiração.",
+		],
+		"npc_baker": [
+			"João guarda uma moeda real escondida debaixo do balcão. Uma moeda falsa no caixa dele causaria confusão.",
+			"O padeiro conta moedas com nervosismo. Plantar uma moeda com brasão real na padaria levantaria suspeitas.",
+			"João olha para o castelo com raiva. Qualquer item real plantado perto dele o faria explodir.",
+		],
+		"npc_smith": [
+			"Marten olha para o martelo com ressentimento. Ele se revoltaria se visse uma arma real perto da forja.",
+			"O ferreiro aperta os punhos ao ver guardas. Uma espada enferrujada plantada na praça como 'prova' o tiraria do sério.",
+			"Marten range os dentes trabalhando. A adaga do Rei perto da forja seria o estopim.",
+		],
+		"npc_guard": [
+			"Bram fica parado no portão sem se mover. Só um tumulto grande o faria sair de lá.",
+			"O guarda-chefe confere a tranca do portão obsessivamente. Nenhum objeto ou suborno vai tirá-lo dali — só o caos.",
+			"Bram parece cansado, mas não sai do posto. Só uma revolta popular o forçaria a abandonar o portão.",
+		],
+		"npc_guard2": [
+			"Renato olha para as moedas de outros com inveja. Uma moeda real ou falsa chamaria a atenção dele.",
+			"O patrulheiro admira as armas do ferreiro de longe. Uma espada ou martelo plantado na rota dele o distrairia.",
+			"Renato parece desatento e conta moedas no bolso. Qualquer objeto de valor o desviaria da patrulha.",
+		],
+		"npc_priestess": [
+			"Mira toca a relíquia com reverência. Se a relíquia sumisse do templo, ela ficaria desesperada.",
+			"A sacerdotisa relê o livro de ritos com preocupação. Mover o livro de ritos para outro lugar a perturbaria profundamente.",
+			"Mira olha para o céu buscando sinais. A relíquia fora do templo seria um 'sinal divino' para ela agir.",
+		],
+		"npc_merchant": [
+			"Valdo examina moedas com uma lupa. Uma moeda falsa misturada às dele o faria desconfiar do sistema.",
+			"O mercador confere sua mercadoria paranóico. Plantar uma moeda real perto dele levantaria questões sobre de onde veio.",
+			"Valdo embala tudo para ir embora. Qualquer evidência de corrupção real perto dele o motivaria a falar.",
+		],
+		"npc_orphan": [
+			"Lila olha para a maçã com fome. Dar comida a ela ganha sua confiança — ela sabe coisas.",
+			"A órfã brinca perto do lago sozinha. Um item pequeno como presente a faria se abrir sobre o que viu.",
+			"Lila desenha no chão com um graveto. Ela confia em quem é gentil — comida mostra cuidado.",
+		],
+		"villager_farmer": [
+			"Tobias examina a terra com frustração. Uma carta lacrada sobre novos impostos o revoltaria.",
+			"O fazendeiro olha para o poste de decretos com medo. Plantar uma carta ou documento real ali o motivaria a agir.",
+			"Tobias guarda sementes com desespero. Qualquer documento real provando novos impostos seria o limite dele.",
+		],
+		"villager_woman": [
+			"Helga espia a casa dos vizinhos. Qualquer objeto real fora do lugar ela vai notar e espalhar para todos.",
+			"A camponesa fofoca na fonte. Plantar uma moeda real ou anel na praça e ela conta para a vila inteira.",
+			"Helga observa tudo com olhos de águia. Qualquer item do Rei fora do castelo ela transforma em escândalo.",
+		],
+		"villager_elder": [
+			"Osric vigia o portão de longe com olhos atentos. Não tente enganá-lo — ele reporta tudo ao Bram.",
+			"O ancião faz anotações mentais de tudo. Nenhum truque funciona nele — ele é incorruptível.",
+			"Osric observa cada movimento na vila. Tentá-lo é perda de tempo — ele sempre avisa o Bram.",
+		],
+		"villager_boy": [
+			"Pip corre atrás de borboletas perto do lago. Ele é uma criança — não entende de conspirações.",
+			"O menino faz barulho correndo pela vila. Ele não liga para política — só quer brincar.",
+			"Pip empilha pedrinhas perto da fonte. Inocente demais para se envolver — mas repete tudo que ouve.",
+		],
+		"villager_lady": [
+			"Isolde examina suas jóias com vaidade. O anel com brasão real perto dela a faria questionar a nobreza do Rei.",
+			"A Dama ajusta seu vestido e confere o reflexo. Uma moeda real ou objeto de corte a faria pensar que o Rei distribui favores.",
+			"Isolde compara suas jóias com as da corte. O anel real fora do castelo a convenceria de que o poder está mudando.",
+		],
+	}
+	var h: Array = hints.get(npc_id, ["Nada de especial a notar por enquanto."])
+	return h[mini(d, h.size() - 1)]
+
+
+func _listen_hint(npc_id: String) -> String:
+	var d := clampi(Game.day - 1, 0, 2)
+	var hints := {
+		"npc_king": [
+			"'Esses camponeses não sabem seu lugar...' — O Rei teme rebeliões. Sussurrar sobre uma revolta iminente o desestabilizaria.",
+			"'Preciso de mais guardas...' — O Rei está paranoico. Boatos sobre traição na corte o deixariam em pânico.",
+			"'Ninguém pode saber disso...' — O Rei esconde algo grave. Sussurrar que seus segredos foram revelados o quebraria.",
+		],
+		"npc_baker": [
+			"'Esses impostos vão me falir!' — João odeia os impostos reais. Sussurrar sobre aumento de taxas o revoltaria.",
+			"'O Rei não merece meu pão.' — O padeiro está no limite. Boatos sobre confisco da padaria o fariam agir.",
+			"'Se alguém tivesse coragem...' — João está quase pronto. Sussurrar que outros já estão se revoltando o empurraria.",
+		],
+		"npc_smith": [
+			"'A guarda real me humilhou!' — Marten odeia a guarda. Sussurrar sobre abuso dos guardas o faria explodir.",
+			"'O Rei taxa meu ferro e não protege ninguém.' — Marten está furioso. Boatos sobre a guarda maltratando o povo o motivariam.",
+			"'Se eu pudesse...' — O ferreiro quer agir. Sussurrar que a guarda está fraca ou que outros se revoltaram o traria para o lado certo.",
+		],
+		"npc_guard": [
+			"'Enquanto eu estiver aqui, ninguém passa.' — Bram é absolutamente leal. Só um motim o tiraria do portão.",
+			"'Meu dever é com o Rei e ponto final.' — Bram não cede a boatos. Apenas caos generalizado o forçaria a agir.",
+			"'Mesmo cansado, não saio daqui.' — A única forma de mover Bram é criar uma revolta que ele não possa ignorar.",
+		],
+		"npc_guard2": [
+			"'O soldo nem paga minhas contas...' — Renato reclama do salário. Sussurrar sobre pagamento melhor o tentaria.",
+			"'Por que Bram ganha mais que eu?' — Renato tem inveja. Boatos sobre dinheiro ou privilégios dos guardas o irritariam.",
+			"'Estou cansado de servir quem não me paga.' — Renato está quase desertando. Sussurrar sobre riquezas o convenceria a mudar de lado.",
+		],
+		"npc_priestess": [
+			"'Os céus estão em silêncio...' — Mira está perturbada. Sussurrar sobre um sinal divino contra o Rei a moveria.",
+			"'Algo profano aconteceu no templo.' — Mira pressente algo. Boatos sobre profanação sagrada a fariam questionar o Rei.",
+			"'Se os deuses querem mudança...' — Mira está pronta para ouvir. Sussurrar sobre visões ou profanações a convenceria a agir.",
+		],
+		"npc_merchant": [
+			"'As tarifas do Rei estão me arruinando.' — Valdo odeia as tarifas. Sussurrar sobre novas taxas comerciais o revoltaria.",
+			"'Preciso de um novo rei para os negócios.' — Valdo quer mudança. Boatos sobre liberação do comércio o motivariam.",
+			"'Vou embora se isso continuar.' — Valdo está de saída. Sussurrar sobre oportunidades com um novo regime o traria como aliado.",
+		],
+		"npc_orphan": [
+			"'Queria que alguém cuidasse de mim...' — Lila é carente. Ela repete o que ouve — seja gentil e ela espalhará seus boatos.",
+			"'Vi uma coisa estranha ontem...' — Lila observa tudo. Ela conta segredos para quem é amigável.",
+			"'Ninguém liga pra mim aqui.' — Lila quer atenção. Qualquer conversa gentil a fará sua aliada.",
+		],
+		"villager_farmer": [
+			"'A colheita foi toda para os impostos.' — Tobias está revoltado. Sussurrar sobre novos decretos de cobrança o enfureceria.",
+			"'Meus filhos passam fome por causa do Rei.' — Tobias está desesperado. Boatos sobre confisco de terras o empurrariam para a revolta.",
+			"'Se os outros também se revoltassem...' — Tobias quer companhia. Sussurrar que a vila inteira está insatisfeita o traria para o movimento.",
+		],
+		"villager_woman": [
+			"'Você ouviu o que aconteceu na praça?' — Helga adora fofoca. Qualquer boato escandaloso ela espalha — quanto mais dramático, melhor.",
+			"'O Rei fez outra coisa absurda!' — Helga está empolgada para fofocar. Boatos sobre escândalos da corte ela multiplica por dez.",
+			"'Todo mundo está falando...' — Helga é o megafone da vila. Sussurrar qualquer coisa sobre o Rei e ela garante que todos saibam.",
+		],
+		"villager_elder": [
+			"'Reis justos não fazem isso.' — Osric é sábio e incorruptível. Não tente manipulá-lo — ele reporta tudo ao Bram.",
+			"'Já vi reinos caírem antes.' — Osric observa e julga. Ele não pode ser enganado — cuidado.",
+			"'A verdade sempre aparece.' — Osric é um obstáculo. Evite-o com itens suspeitos — ele é os olhos de Bram.",
+		],
+		"villager_boy": [
+			"'Queria brincar mais, mas mamãe me põe pra trabalhar...' — Pip é só uma criança. Não tem noção de política.",
+			"'Vi o guarda pegar uma coisa brilhante!' — Pip vê coisas mas não entende. Ele repete sem filtro.",
+			"'Quero ser cavaleiro quando crescer!' — Pip vive no mundo da fantasia. Inocente — mas é uma boa distração.",
+		],
+		"villager_lady": [
+			"'A corte já não é o que era.' — Isolde está insatisfeita. Sussurrar sobre confisco de terras nobres a revoltaria.",
+			"'O Rei distribui favores a quem não merece.' — Isolde quer mudança. Boatos sobre a nobreza perdendo prestígio a motivariam.",
+			"'Talvez seja hora de mudar de lado.' — Isolde está pronta. Sussurrar sobre um novo poder emergindo a convenceria a agir.",
+		],
+	}
+	var h: Array = hints.get(npc_id, ["Nada de concreto — tente novamente mais tarde."])
+	return h[mini(d, h.size() - 1)]
+
+
+func _evaluate_ask_help(npc: NPC) -> Dictionary:
+	var nid := npc.id
+	var st: Dictionary = Game.npc_state.get(nid, {})
+	var loyalty := float(st.get("loyalty", 100))
+	var fear := float(st.get("fear", 50))
+	var instab := Game.instability
+
+	var accepts := false
+	var accept_line := "Vou te ajudar."
+	var refuse_line := "Não tenho nada a ver com isso."
+	var toast := "Ficou desconfiado."
+	var suspicion_penalty := 15.0
+	var anger_penalty := 10.0
+
+	match nid:
+		"villager_boy":  # Pip — ajuda sempre, sem senso
+			accepts = true
+			accept_line = "Boa! Que missão secreta é essa?!"
+			toast = ""
+		"npc_orphan":  # Lila — ajuda se não estiver com muito medo
+			accepts = fear < 65.0
+			accept_line = "Tudo bem, posso fazer isso."
+			refuse_line = "Tenho medo de me meter em problema..."
+			toast = "Ela está com medo demais."
+			suspicion_penalty = 5.0
+			anger_penalty = 0.0
+		"npc_merchant":  # Valdo — ajuda se lealdade baixa OU instabilidade alta
+			accepts = loyalty < 30.0 or instab > 40.0
+			accept_line = "Hmm... tem algo para mim nisso?"
+			refuse_line = "Não gosto de me comprometer."
+			toast = "Quer mais instabilidade antes."
+			suspicion_penalty = 10.0
+			anger_penalty = 5.0
+		"npc_baker":  # João — ajuda se instabilidade > 50
+			accepts = instab > 50.0
+			accept_line = "Tá bom, já estou farto desta situação!"
+			refuse_line = "Ainda é muito arriscado para mim."
+			toast = "Precisa de mais pressão na cidade (instabilidade > 50)."
+			suspicion_penalty = 10.0
+			anger_penalty = 5.0
+		"npc_smith":  # Marten — ajuda se instabilidade > 50
+			accepts = instab > 50.0
+			accept_line = "Se vai mudar alguma coisa, estou dentro!"
+			refuse_line = "Ainda não chegou a hora."
+			toast = "Precisa de mais pressão na cidade (instabilidade > 50)."
+			suspicion_penalty = 10.0
+			anger_penalty = 8.0
+		"villager_woman":  # Helga — ajuda se instabilidade > 30
+			accepts = instab > 30.0
+			accept_line = "Ah, que delícia de confusão! Tô dentro!"
+			refuse_line = "Não, não, eu não me meto em intrigas."
+			toast = "Precisa de mais tensão na cidade (instabilidade > 30)."
+			suspicion_penalty = 8.0
+			anger_penalty = 0.0
+		"villager_farmer":  # Tobias — ajuda se instabilidade > 40
+			accepts = instab > 40.0
+			accept_line = "Já estou cansado de tudo isso. Tudo bem."
+			refuse_line = "Preciso proteger minha família."
+			toast = "Ainda tem medo de represálias (instabilidade > 40)."
+			suspicion_penalty = 10.0
+			anger_penalty = 5.0
+		"npc_priestess":  # Mira — ajuda só se lealdade muito baixa
+			accepts = loyalty < 35.0
+			accept_line = "Se os céus permitem... vou confiar em você."
+			refuse_line = "Devo manter-me fiel à ordem estabelecida."
+			toast = "Lealdade alta demais — ela respeita a ordem."
+			suspicion_penalty = 12.0
+			anger_penalty = 5.0
+		"villager_elder":  # Ancião Osric — ajuda só se lealdade baixa E instabilidade > 60
+			accepts = loyalty < 30.0 and instab > 60.0
+			accept_line = "Vi reis caírem antes. Farei o que posso."
+			refuse_line = "A prudência me impede. Não sou impulsivo."
+			toast = "Precisa de instabilidade alta e lealdade baixa (> 60 / < 30)."
+			suspicion_penalty = 8.0
+			anger_penalty = 0.0
+		"villager_lady":  # Dama Isolde — oportunista, ajuda se instab > 60
+			accepts = instab > 60.0
+			accept_line = "Talvez seja hora de apostar em outra carta..."
+			refuse_line = "Não me envolvo em conspirações, por favor."
+			toast = "Ainda quer ver quem vence antes de agir (instabilidade > 60)."
+			suspicion_penalty = 10.0
+			anger_penalty = 8.0
+		"npc_king", "npc_guard", "npc_guard2":  # Nunca ajudam
+			accepts = false
+			refuse_line = "Guarda! GUARDA!"
+			toast = "Denunciou você!"
+			suspicion_penalty = 30.0
+			anger_penalty = 25.0
+		_:
+			accepts = loyalty < 40.0
+
+	return {
+		"accepts": accepts,
+		"accept_line": accept_line,
+		"refuse_line": refuse_line,
+		"toast": toast,
+		"suspicion_penalty": suspicion_penalty,
+		"anger_penalty": anger_penalty,
+	}
 
 
 func _evaluate_chain_events() -> void:

@@ -548,13 +548,13 @@ func _try_start_gossip() -> void:
 func is_holding_suspicious_item() -> bool:
 	if held_object == null:
 		return false
-	# Item é suspeito se tiver tag "real", "arma", "missao" ou "proibido" na sua definição.
+	# Item é suspeito apenas se tiver tag "real", "arma" ou "sagrado".
+	# Itens comuns (comida, escrito, pesado) não geram detecção.
 	if held_object.has_method("get") and held_object.get("def") is Dictionary:
 		for tag: String in held_object.def.get("tags", []):
-			if tag in ["real", "arma", "missao", "proibido", "chave", "reliquia"]:
+			if tag in ["real", "arma", "sagrado"]:
 				return true
-	# Fallback: qualquer item carregado é suspeito perto de autoridades.
-	return held_object != null
+	return false
 
 
 ## Módulo 2: retorna true se o jogador estiver em modo furtivo (agachado/stealth).

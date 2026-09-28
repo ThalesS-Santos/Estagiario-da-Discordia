@@ -338,12 +338,32 @@ func _osric_catches_player() -> void:
 # ============================================================================
 # API pública — world.gd chama estes métodos nos momentos certos
 # ============================================================================
-func notify_object_picked(obj_id: String) -> void:
-	match obj_id:
-		"sealed_letter", "rites_book":
-			_discover_clue("carta_convocacao")
-		"royal_coin", "royal_ring":
+func notify_object_picked(_obj_id: String) -> void:
+	pass
+
+
+func notify_npc_observed(npc_id: String) -> void:
+	match npc_id:
+		"npc_guard":
+			_discover_clue("bram_padrao")
+		"villager_elder":
+			_discover_clue("osric_vigia")
+		"npc_baker":
+			_discover_clue("joao_rancor")
+
+
+func notify_npc_listened(npc_id: String) -> void:
+	match npc_id:
+		"npc_guard":
+			_discover_clue("bram_padrao")
+		"npc_baker":
+			_discover_clue("joao_rancor")
+		"npc_merchant", "villager_lady":
 			_discover_clue("moeda_real")
+		"villager_elder":
+			_discover_clue("osric_vigia")
+		"npc_priestess", "villager_farmer":
+			_discover_clue("carta_convocacao")
 
 
 func notify_npc_whispered(npc_id: String) -> void:
