@@ -942,6 +942,7 @@ func show_credits() -> void:
 
 
 func show_defeat() -> void:
+	Music.stop()
 	var s := _new_screen()
 	_bg(s)
 	var l := _lbl(s, "", 22, Color(1.0, 0.5, 0.45), Vector2(240, 200), 800.0)
@@ -962,6 +963,7 @@ func show_defeat() -> void:
 
 
 func show_victory() -> void:
+	Music.stop()
 	var s := _new_screen()
 	_bg(s, Color(1, 1, 1))
 	_flash(1.0)
