@@ -154,15 +154,28 @@ def main():
 
     trees = []
     rt = rng(2026)
-    for _ in range(9000):
-        x, y = rt.uniform(10, 1270), rt.uniform(40, 955)
+    # centro aproximado da vila; fora dele o mapa vira floresta densa
+    def _outer_weight(x, y):
+        dx = max(0, abs(x - 640) - 260)
+        dy = max(0, abs(y - 480) - 200)
+        return min(1.0, math.hypot(dx, dy) / 260.0)
+
+    for _ in range(14000):
+        x, y = rt.uniform(6, 1274), rt.uniform(20, 958)
         forest = terrain._forest_dark(x / 2, y / 2)
-        if not forest and rt.random() > 0.06:
-            continue
+        outer = _outer_weight(x, y)
+        # chance de aceitar como floresta cresce fora da vila (sem depender só da máscara retangular)
+        if not forest:
+            if rt.random() > 0.05 + outer * 0.55:
+                continue
+            forest = outer > 0.35
         if blocked(x, y, 6):
             continue
-        min_d = 40 if forest else 70
-        if any(math.hypot(x - tx, (y - ty) * 1.3) < min_d for tx, ty, _ in trees):
+        # espaçamento irregular: base + ruído + aperta na floresta densa, folga perto da vila
+        base = 34 if forest else 62
+        jitter = rt.uniform(-8, 18)
+        min_d = base + jitter - outer * 6
+        if any(math.hypot(x - tx, (y - ty) * 1.25) < min_d for tx, ty, _ in trees):
             continue
         roll = rt.random()
         if forest:
@@ -177,7 +190,7 @@ def main():
         add(kind, x, y, phase=rt.random(), flip=rt.random() < 0.5)
 
     # arbustos, cogumelos, pedras grandes
-    for _ in range(140):
+    for _ in range(360):
         x, y = rt.uniform(10, 1270), rt.uniform(60, 955)
         if blocked(x, y, 0) or any(math.hypot(x - tx, y - ty) < 30 for tx, ty, _ in trees):
             continue
@@ -187,7 +200,7 @@ def main():
         add(k, x, y, flip=rt.random() < 0.5)
 
     # decoração rente ao chão
-    for _ in range(900):
+    for _ in range(2200):
         x, y = rt.uniform(4, 1276), rt.uniform(8, 956)
         cell = (int(x // 32), int(y // 32))
         if cell in L.ROAD or cell in L.PLAZA or cell in L.STEPS:

@@ -52,6 +52,7 @@ var cam_target := Vector2(640, 380)
 var follow = null
 var _shadowing_npc: NPC = null  # NPC que o jogador está seguindo (ação "follow")
 var cam_zoom := 1.0
+var cam_limit_bottom := Game.MAP_SIZE.y
 var sim_events: Array = []
 var sim_time := 0.0
 var sim_idx := 0
@@ -746,7 +747,13 @@ func _debug_skip_to_conclusion() -> void:
 	phase = Phase.ENDED
 	player.input_enabled = false
 	hud.set_ui_visible(false)
-	await _conclusion_sequence()
+	var all_npcs: Array = []
+	for id in npcs:
+		if id != "npc_king" and id != "npc_guard" and id != "npc_guard2":
+			all_npcs.append(npcs[id])
+	for v: NPC in villagers:
+		all_npcs.append(v)
+	await _conclusion_sequence(all_npcs)
 	victory.emit()
 
 
@@ -1592,34 +1599,51 @@ func _victory_sequence() -> void:
 		n.say("" , 0.1)
 	await get_tree().create_timer(2.5).timeout
 
-	# Limpa armas dos NPCs (fogos permanecem para o cenário)
+	# Guardas caem mortos junto com o Rei
+	var guard_end: NPC = npcs.get("npc_guard")
+	if guard_end and is_instance_valid(guard_end):
+		guard_end.position = plaza + Vector2(-30, 15)
+		guard_end.fall()
+		guard_end.moving = false
+		guard_end.set_physics_process(false)
+	var guard2_end: NPC = npcs.get("npc_guard2")
+	if guard2_end and is_instance_valid(guard2_end):
+		guard2_end.position = plaza + Vector2(35, 20)
+		guard2_end.fall()
+		guard2_end.moving = false
+		guard2_end.set_physics_process(false)
+
+	# Alguns NPCs caem mortos (colateral da revolta)
+	var dead_count := 0
+	for n: NPC in revolt_npcs:
+		if dead_count >= 3:
+			break
+		if randf() < 0.35:
+			n.fall()
+			dead_count += 1
+
+	# Limpa armas — fogos permanecem
 	for n: NPC in revolt_npcs:
 		for child in n.get_children():
 			if child is Sprite2D and child.texture is AtlasTexture and child.texture.atlas == WEAPONS_TEX:
 				child.queue_free()
-		n.moving = false
-		n.set_physics_process(false)
-	var guard_end: NPC = npcs.get("npc_guard")
-	if guard_end:
-		guard_end.moving = false
-		guard_end.set_physics_process(false)
-	var guard2_end: NPC = npcs.get("npc_guard2")
-	if guard2_end:
-		guard2_end.moving = false
-		guard2_end.set_physics_process(false)
+		if not n.fallen:
+			n.moving = false
+			n.set_physics_process(false)
 	king.moving = false
 	king.set_physics_process(false)
 
 	# ======================== CONCLUSÃO CINEMATOGRÁFICA ========================
-	await _conclusion_sequence()
+	await _conclusion_sequence(revolt_npcs)
 
 
 ## Conclusão cinematográfica em 3 partes (a 4ª parte acontece em main.gd/show_victory).
-func _conclusion_sequence() -> void:
+func _conclusion_sequence(revolt_npcs: Array) -> void:
 	var nm := str(Game.player_name)
 	var _concl_nodes: Array[Node] = []
+	var _hidden_trees: Array[Node] = []
 
-	# ---- PARTE 1: Visor de pulso ----
+	# ---- PARTE 1: Visor de pulso (relatório da Agência) ----
 	cam_target = player.global_position
 	cam_zoom = 1.0
 	var wrist := WristIntro.new()
@@ -1628,40 +1652,287 @@ func _conclusion_sequence() -> void:
 	wrist.play()
 	await wrist.finished
 	wrist.reveal_world()
-	await get_tree().create_timer(0.8).timeout
 
-	# ---- Transição: vila destruída ----
-	# Escurecer o ambiente (noite pós-revolta)
-	var dark_overlay := CanvasModulate.new()
-	dark_overlay.color = Color(0.45, 0.35, 0.25, 1.0)
-	add_child(dark_overlay)
-	_concl_nodes.append(dark_overlay)
+	# ---- Transição DIRETA: noite + chuva + fogo já aplicados ----
+	# Escurecer IMEDIATAMENTE (phase=ENDED impede _process de resetar)
+	mod.color = Color(0.12, 0.08, 0.16, 1.0)
+	# Luzes avermelhadas
+	for light in village.lights:
+		if light is PointLight2D:
+			create_tween().tween_property(light, "color", Color(1.0, 0.2, 0.05), 0.5)
 
-	# Espalhar fogos pela vila se não existirem da revolta
-	if _revolt_fires.is_empty():
-		var fire_positions := [
-			Game.loc_pos("plaza") + Vector2(-40, -20),
-			Game.loc_pos("plaza") + Vector2(60, 10),
-			Game.loc_pos("bakery") + Vector2(20, -10),
-			Game.loc_pos("forge") + Vector2(-10, 5),
-			Game.loc_pos("castle_gate") + Vector2(0, 30),
-		]
-		for fp in fire_positions:
+	# === CHUVA (CanvasLayer para ficar na tela independente da câmera) ===
+	var rain_layer := CanvasLayer.new()
+	rain_layer.layer = 5
+	add_child(rain_layer)
+	_concl_nodes.append(rain_layer)
+	var rain := CPUParticles2D.new()
+	rain.emitting = true
+	rain.amount = 400
+	rain.lifetime = 0.8
+	rain.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	rain.emission_rect_extents = Vector2(700, 5)
+	rain.direction = Vector2(0.15, 1)
+	rain.spread = 4.0
+	rain.gravity = Vector2(20, 1000)
+	rain.initial_velocity_min = 500.0
+	rain.initial_velocity_max = 700.0
+	rain.scale_amount_min = 1.0
+	rain.scale_amount_max = 2.0
+	rain.color = Color(0.6, 0.7, 0.9, 0.35)
+	rain.position = Vector2(640, -30)
+	rain_layer.add_child(rain)
+
+	# === FOGO EM TUDO — casas, florestas, castelo ===
+	var massive_fire_positions := [
+		Vector2(280, 410), Vector2(320, 400), Vector2(340, 430),
+		Vector2(940, 410), Vector2(980, 420), Vector2(1000, 400),
+		Vector2(100, 410), Vector2(130, 430), Vector2(160, 410),
+		Vector2(580, 460), Vector2(660, 450), Vector2(620, 480),
+		Vector2(580, 100), Vector2(640, 80), Vector2(700, 100), Vector2(640, 140),
+		Vector2(200, 700), Vector2(240, 710),
+		Vector2(200, 200), Vector2(400, 180), Vector2(900, 200), Vector2(1100, 180),
+		Vector2(900, 600), Vector2(1050, 550), Vector2(100, 600),
+		Vector2(640, 550), Vector2(640, 650),
+		Vector2(400, 540), Vector2(550, 540), Vector2(700, 540),
+	]
+	for fp in massive_fire_positions:
+		if not _has_fire_near(fp):
 			var fire := _spawn_fire(fp, FIRE_TEX, 16, 24)
 			_revolt_fires.append(fire)
+			_concl_nodes.append(fire)
+	for fp in massive_fire_positions:
+		if randf() < 0.5:
 			emit_particle("fire_sparks", fp)
-	# Fumaça subindo em vários pontos
-	for fp_idx in _revolt_fires.size():
-		if fp_idx < 3 and is_instance_valid(_revolt_fires[fp_idx]):
-			emit_particle("smoke_thin", _revolt_fires[fp_idx].position + Vector2(0, -20))
+			emit_particle("smoke_thick", fp + Vector2(0, -20))
 
-	await get_tree().create_timer(0.5).timeout
+	# === TODOS os NPCs na praça comemorando (incluindo rei/guardas mortos no chão) ===
+	var plaza := Game.loc_pos("plaza")
+	# Rei e guardas caídos na praça
+	var king: NPC = npcs.get("npc_king")
+	if king and is_instance_valid(king):
+		king.position = plaza + Vector2(0, 10)
+		king.visible = true
+		king.fall()
+	var guard: NPC = npcs.get("npc_guard")
+	if guard and is_instance_valid(guard):
+		guard.position = plaza + Vector2(-35, 20)
+		guard.visible = true
+		guard.fall()
+	var guard2: NPC = npcs.get("npc_guard2")
+	if guard2 and is_instance_valid(guard2):
+		guard2.position = plaza + Vector2(40, 25)
+		guard2.visible = true
+		guard2.fall()
+	# NPCs vivos na praça gritando e vibrando
+	var shouts := ["LIBERDADE!", "O tirano caiu!", "Vitória!", "Abaixo o Rei!", "Somos livres!", "Justiça!", "Fogo neles!", "O povo venceu!"]
+	for n: NPC in revolt_npcs:
+		if n.fallen:
+			continue
+		n.ambient = false
+		n.moving = false
+		n.set_physics_process(true)
+		n.visible = true
+		n.get_up()
+		var celebration_pos := plaza + Vector2(randf_range(-90, 90), randf_range(-60, 60))
+		n.position = celebration_pos
+		n.say(shouts[randi() % shouts.size()], 30.0)
+		n.show_emote("!", 30.0)
+		if not _has_weapon(n):
+			_give_weapon(n)
 
-	# ---- PARTE 2: A Figura Misteriosa ----
+	# === Limpar área inferior esquerda (esconder árvores/props perto do templo) ===
+	for child in village.ysort.get_children():
+		if child is NPC or child == player or not (child is Node2D):
+			continue
+		var cpos: Vector2 = (child as Node2D).position
+		if cpos.x < 380 and cpos.y > 740:
+			child.visible = false
+			_hidden_trees.append(child)
+	# === Expandir chão verde para cobrir bordas do mapa (replicar gramado) ===
+	# Fazenda + toda a área abaixo/ao redor do mapa visível
+	var grass_col := Color("84c669")
+	var grass_dark := Color("65a556")
+	# Chão inferior (cobre de y=780 até y=1200, toda a largura + extra)
+	var ground_ext := ColorRect.new()
+	ground_ext.color = grass_col
+	ground_ext.position = Vector2(-160, 680)
+	ground_ext.size = Vector2(1600, 560)
+	ground_ext.z_index = -19
+	village.add_child(ground_ext)
+	_concl_nodes.append(ground_ext)
+	# Faixas laterais (esquerda e direita)
+	for side_data in [Vector2(-160, -160), Vector2(1080, -160)]:
+		var side_ground := ColorRect.new()
+		side_ground.color = grass_col
+		side_ground.position = side_data
+		side_ground.size = Vector2(360, 1400)
+		side_ground.z_index = -19
+		village.add_child(side_ground)
+		_concl_nodes.append(side_ground)
+	# Zona livre da cinemática (nada deve cair aqui — figura misteriosa)
+	var _in_scene_zone := func(pos: Vector2) -> bool:
+		return pos.x < 420 and pos.y > 700 and pos.y < 960
+	# Só decora a moldura estendida (fora do 0..1280 × 0..960 principal)
+	var _in_extension := func(pos: Vector2) -> bool:
+		return pos.y >= 680 or pos.x <= 200 or pos.x >= 1080 or pos.y <= 100
+
+	# Manchas de grama (escuras e claras) para quebrar o verde chapado
+	var grass_light := Color("8bd87d")
+	for _i in range(520):
+		var p_patch := Vector2(randf_range(-140, 1420), randf_range(-140, 1220))
+		if not _in_extension.call(p_patch) or _in_scene_zone.call(p_patch):
+			continue
+		var patch := ColorRect.new()
+		patch.color = grass_dark if randf() < 0.65 else grass_light
+		patch.position = p_patch
+		patch.size = Vector2(randf_range(14, 62), randf_range(10, 36))
+		patch.z_index = -18
+		village.add_child(patch)
+		_concl_nodes.append(patch)
+	# Pedrinhas (2×2 px) espalhadas — mesma textura das bordas do mapa
+	var stone_col := Color("8b9bb4")
+	var stone_light := Color("c0cbdc")
+	for _i in range(1400):
+		var p_stone := Vector2(randf_range(-140, 1420), randf_range(-140, 1220))
+		if not _in_extension.call(p_stone) or _in_scene_zone.call(p_stone):
+			continue
+		var pebble := ColorRect.new()
+		pebble.color = stone_light if randf() < 0.5 else stone_col
+		pebble.position = p_stone
+		pebble.size = Vector2(2, 2)
+		pebble.z_index = -17
+		village.add_child(pebble)
+		_concl_nodes.append(pebble)
+
+	# Ruído de grama: milhares de pontinhos 1×1/2×2 em três tons — quebra o verde chapado
+	var _grass_shades := [Color("84c669"), Color("8bd87d"), Color("65a556"), Color("479f4a"), Color("2f7a45")]
+	for _i in range(6500):
+		var p_dot := Vector2(randf_range(-140, 1420), randf_range(-140, 1220))
+		if not _in_extension.call(p_dot) or _in_scene_zone.call(p_dot):
+			continue
+		var dot := ColorRect.new()
+		dot.color = _grass_shades[randi() % _grass_shades.size()]
+		dot.position = p_dot
+		dot.size = Vector2(2, 2) if randf() < 0.55 else Vector2(1, 1)
+		dot.z_index = -18
+		village.add_child(dot)
+		_concl_nodes.append(dot)
+
+	# === Árvores, arbustos, tufos e flores nas bordas ===
+	var _tree_tex: Array[Texture2D] = [
+		load("res://assets/gen/env/tree_oak.png"),
+		load("res://assets/gen/env/tree_oak_dark.png"),
+		load("res://assets/gen/env/tree_pine.png"),
+		load("res://assets/gen/env/tree_pine_dark.png"),
+		load("res://assets/gen/env/tree_huge.png"),
+		load("res://assets/gen/env/tree_huge_dark.png"),
+		load("res://assets/gen/env/tree_oak_autumn.png"),
+	]
+	var _bush_tex: Array[Texture2D] = [
+		load("res://assets/gen/env/bush.png"),
+		load("res://assets/gen/env/bush_berry.png"),
+		load("res://assets/gen/env/bush_flower.png"),
+	]
+	var _tuft_tex: Texture2D = load("res://assets/gen/env/tuft.png")
+	var _flowers_tex: Texture2D = load("res://assets/gen/env/flowers.png")
+	var _rock_tex: Texture2D = load("res://assets/gen/env/rock_small.png")
+	var _mush_tex: Texture2D = load("res://assets/gen/env/mushroom.png")
+
+	var _placed_trees: Array[Vector2] = []
+	# Espaçamento irregular quebra o padrão robótico do grid antigo
+	var _can_place := func(pos: Vector2, min_d: float) -> bool:
+		for p in _placed_trees:
+			if pos.distance_to(p) < min_d:
+				return false
+		return true
+
+	# Scatter denso — muitas tentativas com jitter total, filtros descartam o que não cabe
+	for _i in range(3200):
+		var pos := Vector2(randf_range(-140, 1420), randf_range(-140, 1220))
+		if _in_scene_zone.call(pos):
+			continue
+		if not _in_extension.call(pos):
+			continue
+		# min_dist irregular (34–72) — clusters e clareiras naturais
+		var min_d := randf_range(26.0, 78.0)
+		if not _can_place.call(pos, min_d):
+			continue
+		var tex: Texture2D = _tree_tex[randi() % _tree_tex.size()]
+		var t_spr := Sprite2D.new()
+		t_spr.texture = tex
+		t_spr.hframes = 4
+		t_spr.frame = randi() % 4
+		t_spr.position = pos
+		t_spr.scale = Vector2(2, 2)
+		t_spr.flip_h = randf() < 0.5
+		t_spr.centered = true
+		village.add_child(t_spr)
+		_concl_nodes.append(t_spr)
+		_placed_trees.append(pos)
+
+	# Arbustos preenchendo lacunas
+	for _i in range(460):
+		var pos := Vector2(randf_range(-140, 1420), randf_range(-40, 1120))
+		if _in_scene_zone.call(pos) or not _in_extension.call(pos):
+			continue
+		if not _can_place.call(pos, 28.0):
+			continue
+		var b_spr := Sprite2D.new()
+		b_spr.texture = _bush_tex[randi() % _bush_tex.size()]
+		b_spr.position = pos
+		b_spr.scale = Vector2(2, 2)
+		b_spr.flip_h = randf() < 0.5
+		b_spr.centered = true
+		village.add_child(b_spr)
+		_concl_nodes.append(b_spr)
+		_placed_trees.append(pos)
+
+	# Tufos de grama, flores, pedrinhas e cogumelos (rente ao chão)
+	for _i in range(2600):
+		var pos := Vector2(randf_range(-140, 1420), randf_range(-70, 1150))
+		if _in_scene_zone.call(pos) or not _in_extension.call(pos):
+			continue
+		var roll := randf()
+		var d_spr := Sprite2D.new()
+		if roll < 0.45:
+			d_spr.texture = _tuft_tex
+			d_spr.hframes = 4
+			d_spr.frame = randi() % 4
+		elif roll < 0.78:
+			d_spr.texture = _flowers_tex
+			d_spr.hframes = 4
+			d_spr.vframes = 5
+			d_spr.frame = randi() % 20
+		elif roll < 0.93:
+			d_spr.texture = _rock_tex
+		else:
+			d_spr.texture = _mush_tex
+		d_spr.position = pos
+		d_spr.scale = Vector2(2, 2)
+		d_spr.flip_h = randf() < 0.5
+		d_spr.centered = true
+		d_spr.z_index = -5
+		village.add_child(d_spr)
+		_concl_nodes.append(d_spr)
+
+	# ---- PARTE 2: A Figura Misteriosa (inferior esquerda, abaixo do templo) ----
+	cam_limit_bottom = 1100.0
+	# Área limpa abaixo do templo: centro em (200, 830)
+	var scene_center := Vector2(200, 830)
+
+	# Mover jogador para a área da cena
+	player.global_position = scene_center + Vector2(0, 50)
+	player.visible = true
+
+	# Câmera enquadra parte inferior (praça em cima, cena secreta embaixo)
+	cam_target = Vector2(400, 680)
+	cam_zoom = 0.82
+	await get_tree().create_timer(1.5).timeout
+
 	Sfx.play("portal_open")
 	shake = 3.0
-	var portal_pos := player.global_position + Vector2(0, -80)
-	cam_target = (player.global_position + portal_pos) / 2.0
+	var portal_pos := scene_center + Vector2(0, -30)
 
 	var portal_spr := _create_animated_portal(portal_pos, "cyan")
 	_concl_nodes.append(portal_spr)
@@ -1676,30 +1947,29 @@ func _conclusion_sequence() -> void:
 	figure.visible = true
 	figure.modulate = Color(2.5, 2.5, 2.5, 1)
 	create_tween().tween_property(figure, "modulate", Color.WHITE, 0.6)
-	# Fechar portal de entrada
 	create_tween().tween_property(portal_spr, "scale", Vector2.ZERO, 0.5).set_delay(0.5)
 
 	await get_tree().create_timer(1.5).timeout
-	_conclusion_say(figure, "Droga...\nCheguei tarde demais.", 3.5)
+	_conclusion_say(figure, "Droga... Cheguei tarde demais.", 3.5, "Figura Misteriosa")
 	await get_tree().create_timer(4.0).timeout
 
 	_conclusion_face_player(figure)
 	await get_tree().create_timer(0.6).timeout
 	Sfx.play("shout")
 	shake = 4.0
-	_conclusion_say(figure, "VOCÊ AÍ!", 2.0)
+	_conclusion_say(figure, "VOCÊ AÍ!", 2.0, "Figura Misteriosa")
 	await get_tree().create_timer(2.5).timeout
 
-	_conclusion_say(figure, "Foi você que fez isso, né...", 3.0)
+	_conclusion_say(figure, "Foi você que fez isso, né...", 3.0, "Figura Misteriosa")
 	await get_tree().create_timer(3.5).timeout
 
-	_conclusion_say(figure, "Esse Rei ia trazer Paz!\nA Agência mentiu para você!", 5.0)
+	_conclusion_say(figure, "Esse Rei ia trazer Paz! A Agência mentiu para você!", 5.0, "Figura Misteriosa")
 	await get_tree().create_timer(5.5).timeout
 
-	_conclusion_say(figure, "Eles tiram o livre-arbítrio\ndas pessoas... sussurram\nboatos... mudam a história.", 6.0)
+	_conclusion_say(figure, "Eles tiram o livre-arbítrio das pessoas... sussurram boatos... mudam a história.", 6.0, "Figura Misteriosa")
 	await get_tree().create_timer(6.5).timeout
 
-	_conclusion_say(figure, "O Diretor não é quem\nvocê pensa qu----", 2.5)
+	_conclusion_say(figure, "O Diretor não é quem você pensa qu----", 2.5, "Figura Misteriosa")
 	await get_tree().create_timer(1.2).timeout
 
 	# ---- PARTE 3: Agentes silenciam a Figura ----
@@ -1707,15 +1977,13 @@ func _conclusion_sequence() -> void:
 	shake = 6.0
 
 	var agent_positions := [
-		player.global_position + Vector2(-90, -50),
-		player.global_position + Vector2(90, -50),
-		player.global_position + Vector2(0, -110),
+		scene_center + Vector2(-70, 10),
+		scene_center + Vector2(70, 10),
+		scene_center + Vector2(0, -60),
 	]
 	var agents: Array[Sprite2D] = []
-	var agent_portals: Array[AnimatedSprite2D] = []
 	for i in agent_positions.size():
 		var ap := _create_animated_portal(agent_positions[i], "red")
-		agent_portals.append(ap)
 		_concl_nodes.append(ap)
 		emit_particle("smoke_thin", agent_positions[i])
 		await get_tree().create_timer(0.2).timeout
@@ -1727,14 +1995,13 @@ func _conclusion_sequence() -> void:
 
 	await get_tree().create_timer(0.6).timeout
 
-	# Agentes cercam a figura — cada um avança um pouco
 	for agent in agents:
 		var dir_to_fig := agent.position.direction_to(figure.position)
 		create_tween().tween_property(agent, "position",
 			agent.position + dir_to_fig * 25.0, 0.5).set_trans(Tween.TRANS_SINE)
 	await get_tree().create_timer(0.6).timeout
 
-	# Disparos de energia sequenciais
+	# Disparos de energia
 	for i2 in agents.size():
 		var bolt := Sprite2D.new()
 		bolt.texture = load("res://assets/gen/conclusion/energy_bolt.png")
@@ -1766,31 +2033,38 @@ func _conclusion_sequence() -> void:
 	tw_fall.parallel().tween_property(figure, "modulate:a", 0.4, 0.4)
 	await get_tree().create_timer(1.5).timeout
 
-	# Portal de saída
-	var exit_pos := player.global_position + Vector2(0, -120)
+	# Portal de saída — agentes arrastam o corpo, um de cada lado
+	var exit_pos := scene_center + Vector2(-80, -60)
 	var exit_portal := _create_animated_portal(exit_pos, "red")
 	_concl_nodes.append(exit_portal)
 	emit_particle("smoke_thin", exit_pos)
 	Sfx.play("whoosh")
 	await get_tree().create_timer(0.5).timeout
 
-	# Dois agentes arrastam o corpo
-	create_tween().tween_property(figure, "position", exit_pos, 1.2).set_trans(Tween.TRANS_SINE)
-	for i3 in agents.size() - 1:
-		create_tween().tween_property(agents[i3], "position", exit_pos, 1.2).set_trans(Tween.TRANS_SINE)
-	await get_tree().create_timer(1.0).timeout
+	# Dois agentes se posicionam um de cada lado do corpo
+	if agents.size() >= 2:
+		create_tween().tween_property(agents[0], "position", figure.position + Vector2(-22, 0), 0.4).set_trans(Tween.TRANS_SINE)
+		create_tween().tween_property(agents[1], "position", figure.position + Vector2(22, 0), 0.4).set_trans(Tween.TRANS_SINE)
+	await get_tree().create_timer(0.5).timeout
 
-	# Último agente fala
+	# Arrastam juntos até o portal
+	create_tween().tween_property(figure, "position", exit_pos, 1.5).set_trans(Tween.TRANS_SINE)
+	if agents.size() >= 2:
+		create_tween().tween_property(agents[0], "position", exit_pos + Vector2(-22, 0), 1.5).set_trans(Tween.TRANS_SINE)
+		create_tween().tween_property(agents[1], "position", exit_pos + Vector2(22, 0), 1.5).set_trans(Tween.TRANS_SINE)
+	await get_tree().create_timer(1.2).timeout
+
+	# Último agente fala com o jogador
 	var last_agent: Sprite2D = agents.back()
 	_conclusion_face_player(last_agent)
 	create_tween().tween_property(last_agent, "position",
 		player.global_position + Vector2(0, -50), 0.8).set_trans(Tween.TRANS_SINE)
 	await get_tree().create_timer(0.5).timeout
 
-	_conclusion_say(last_agent, "Desculpa por isso...\nVocê não deveria saber.", 4.0)
+	_conclusion_say(last_agent, "Desculpa por isso... Você não deveria saber.", 4.0, "Agente Panóptico")
 	await get_tree().create_timer(4.5).timeout
 
-	_conclusion_say(last_agent, "Óbvio... você é\nsó um estagiário.", 3.0)
+	_conclusion_say(last_agent, "Óbvio... você é só um estagiário.", 3.0, "Agente Panóptico")
 	await get_tree().create_timer(2.5).timeout
 
 	# Flash de memória
@@ -1798,11 +2072,15 @@ func _conclusion_sequence() -> void:
 	shake = 3.0
 	await get_tree().create_timer(0.3).timeout
 
-	# Limpar sprites da cena
 	for cn in _concl_nodes:
 		if is_instance_valid(cn):
 			cn.queue_free()
 	_concl_nodes.clear()
+	# Restaurar árvores escondidas
+	for t in _hidden_trees:
+		if is_instance_valid(t):
+			t.visible = true
+	_hidden_trees.clear()
 
 	Sfx.play("confirm")
 	var mem_flash := ColorRect.new()
@@ -1820,6 +2098,13 @@ func _conclusion_sequence() -> void:
 			f.queue_free()
 	_revolt_fires.clear()
 	mem_flash.queue_free()
+
+
+func _has_fire_near(pos: Vector2) -> bool:
+	for f in _revolt_fires:
+		if is_instance_valid(f) and f.position.distance_to(pos) < 30.0:
+			return true
+	return false
 
 
 func _conclusion_wrist_pages(nm: String) -> Array[Dictionary]:
@@ -1877,39 +2162,57 @@ func _create_conclusion_figure(fig_id: String, pos: Vector2, is_mystery: bool) -
 	return spr
 
 
-func _conclusion_say(spr: Sprite2D, text: String, dur: float) -> void:
+func _conclusion_say(_spr: Sprite2D, text: String, dur: float, speaker := "") -> void:
+	# Caixa de diálogo fixa na parte inferior da tela (via HUD = CanvasLayer)
+	var panel := PanelContainer.new()
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(0.02, 0.02, 0.08, 0.95)
+	bg_style.set_corner_radius_all(8)
+	bg_style.set_content_margin_all(16)
+	bg_style.border_color = Color(0.3, 0.8, 1.0, 0.6)
+	bg_style.set_border_width_all(2)
+	panel.add_theme_stylebox_override("panel", bg_style)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	panel.add_child(vbox)
+
+	# Nome do personagem que fala
+	if speaker != "":
+		var name_lbl := Label.new()
+		name_lbl.text = speaker
+		name_lbl.custom_minimum_size = Vector2(500, 0)
+		name_lbl.add_theme_font_size_override("font_size", 14)
+		name_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 1.0))
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		vbox.add_child(name_lbl)
+
 	var lbl := Label.new()
-	lbl.text = text
-	lbl.size = Vector2(160, 0)
+	lbl.text = "\"" + text + "\""
 	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lbl.add_theme_font_size_override("font_size", 10)
+	lbl.custom_minimum_size = Vector2(500, 0)
+	lbl.add_theme_font_size_override("font_size", 18)
 	lbl.add_theme_color_override("font_color", Color.WHITE)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.z_index = 100
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var bg_style := StyleBoxFlat.new()
-	bg_style.bg_color = Color(0.02, 0.02, 0.08, 0.92)
-	bg_style.set_corner_radius_all(3)
-	bg_style.set_content_margin_all(6)
-	bg_style.border_color = Color(0.3, 0.8, 1.0, 0.5)
-	bg_style.set_border_width_all(1)
-	lbl.add_theme_stylebox_override("normal", bg_style)
-	add_child(lbl)
-	# Posicionar centralizado acima do sprite
+	vbox.add_child(lbl)
+
+	hud.add_child(panel)
 	await get_tree().process_frame
-	var min_sz := lbl.get_combined_minimum_size()
-	lbl.size = Vector2(min_sz.x, min_sz.y)
-	lbl.position = spr.position + Vector2(-min_sz.x * 0.5, -min_sz.y - 30)
-	# Garantir que não saia da tela
-	lbl.position.x = clampf(lbl.position.x, 10, 1270 - min_sz.x)
-	lbl.position.y = maxf(lbl.position.y, 10)
-	lbl.scale = Vector2.ZERO
-	lbl.pivot_offset = min_sz * 0.5
+
+	# Centralizar horizontalmente, fixo na parte inferior
+	var sz := panel.size
+	panel.position = Vector2((1280 - sz.x) * 0.5, 640 - sz.y)
+
+	panel.scale = Vector2.ZERO
+	panel.pivot_offset = sz * 0.5
 	var tw := create_tween()
-	tw.tween_property(lbl, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_BACK)
+	tw.tween_property(panel, "scale", Vector2.ONE, 0.15).set_trans(Tween.TRANS_BACK)
 	tw.tween_interval(dur)
-	tw.tween_property(lbl, "scale", Vector2.ZERO, 0.1)
-	tw.tween_callback(lbl.queue_free)
+	tw.tween_property(panel, "scale", Vector2.ZERO, 0.12)
+	tw.tween_callback(panel.queue_free)
 
 
 func _conclusion_face_player(spr: Sprite2D) -> void:
@@ -2084,8 +2387,9 @@ func _process(delta: float) -> void:
 	elif phase == Phase.ACTION or phase == Phase.TERMINAL or phase == Phase.ACTIVE_EVENT:
 		cam_target = player.global_position
 	_update_cam(delta)
-	# luz ambiente
-	mod.color = Color("1a1a2e") if crisis else _ambient()
+	# luz ambiente (não resetar durante cinemática de conclusão)
+	if phase != Phase.ENDED:
+		mod.color = Color("1a1a2e") if crisis else _ambient()
 	# anéis de narrativa
 	for r in rings:
 		r.age += delta
@@ -2731,7 +3035,7 @@ func _update_cam(_delta: float) -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var half := vp / (2.0 * cam_zoom)
 	cam_target.x = clampf(cam_target.x, minf(half.x, 640.0), maxf(Game.MAP_SIZE.x - half.x, 640.0))
-	cam_target.y = clampf(cam_target.y, minf(half.y, 480.0), maxf(Game.MAP_SIZE.y - half.y, 480.0))
+	cam_target.y = clampf(cam_target.y, minf(half.y, 480.0), maxf(cam_limit_bottom - half.y, 480.0))
 	cam.position = cam.position.lerp(cam_target, 0.08 if phase != Phase.ACTION else 0.15)
 	cam.zoom = cam.zoom.lerp(Vector2(cam_zoom, cam_zoom), 0.1)
 	cam.offset = Vector2(randf_range(-shake, shake), randf_range(-shake, shake)) if shake > 0.1 else Vector2.ZERO

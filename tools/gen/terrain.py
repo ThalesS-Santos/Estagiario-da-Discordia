@@ -47,9 +47,14 @@ def cobble_tile(seed):
 
 
 def _forest_dark(x, y):
-    n = 7 * math.sin(x * 0.11) + 6 * math.sin(y * 0.13 + x * 0.04) + 3 * math.sin(x * 0.37 + y * 0.29)
-    return ((x < 215 + n and y < 150 + n) or (x > 440 + n and y < 150 - n) or y > 418 + n
-            or (x < 62 + n and y > 262 + n) or (x > 548 + n and y > 332 + n))
+    # ruído multi-frequência para bordas irregulares (nada de linhas retas)
+    n = (9 * math.sin(x * 0.11) + 8 * math.sin(y * 0.13 + x * 0.04)
+         + 4 * math.sin(x * 0.37 + y * 0.29) + 3 * math.sin(y * 0.47 - x * 0.19)
+         + 2 * math.sin((x + y) * 0.53))
+    # cinturão de floresta cobrindo toda a moldura do mapa
+    return (x < 90 + n or x > 550 + n or y < 60 + n or y > 400 + n
+            # blocos internos originais mantidos para a região do castelo/vila
+            or (x < 235 + n and y < 170 + n) or (x > 420 + n and y < 170 - n))
 
 
 def ground():
@@ -126,12 +131,26 @@ def ground():
     fx, fy, fw, fh = [v // 2 for v in L.FARM]
     rect(img, fx - 1, fy - 1, fw + 2, fh + 2, C["wood_d"])
     rect(img, fx, fy, fw, fh, C["dirt_d"])
-    # detalhes extras na grama (pontinhos de variação)
+    # detalhes extras na grama (pontinhos de variação + pequenas pedrinhas espalhadas)
     px = img.load()
-    for _ in range(2600):
+    for _ in range(7200):
         x, y = r.randrange(NW), r.randrange(NH)
         if px[x, y][:3] == rgb("grass"):
             px[x, y] = C["grass_d"] if r.random() < 0.6 else C["grass_l"]
+    # pedrinhas minúsculas (2 px) espalhadas por toda a grama — dá textura nas bordas
+    for _ in range(520):
+        x, y = r.randrange(2, NW - 2), r.randrange(2, NH - 2)
+        if px[x, y][:3] not in (rgb("grass"), rgb("grass_l"), rgb("grass_d")):
+            continue
+        put(img, x, y, C["stone"])
+        put(img, x + 1, y, C["stone_l"])
+    # touceiras de grama alta em pixel único, para quebrar áreas monótonas
+    for _ in range(900):
+        x, y = r.randrange(1, NW - 1), r.randrange(1, NH - 1)
+        if px[x, y][:3] in (rgb("grass"), rgb("grass_l"), rgb("grass_d")):
+            put(img, x, y, C["leaf_d"])
+            if r.random() < 0.5:
+                put(img, x + 1, y, C["leaf"])
     return img
 
 

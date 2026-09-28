@@ -608,6 +608,35 @@ func _btn(parent: Control, text: String, cb: Callable) -> Button:
 	return b
 
 
+func _victory_btn(parent: Control, text: String, col: Color, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(320, 40)
+	b.add_theme_font_size_override("font_size", 18)
+	b.add_theme_color_override("font_color", col)
+	b.add_theme_color_override("font_hover_color", Color(1, 1, 1))
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.08, 0.12, 0.8)
+	style.set_corner_radius_all(4)
+	style.set_border_width_all(1)
+	style.border_color = Color(col.r, col.g, col.b, 0.3)
+	style.set_content_margin_all(8)
+	b.add_theme_stylebox_override("normal", style)
+	var hover_style := style.duplicate()
+	hover_style.bg_color = Color(0.12, 0.12, 0.18, 0.9)
+	hover_style.border_color = Color(col.r, col.g, col.b, 0.7)
+	b.add_theme_stylebox_override("hover", hover_style)
+	var press_style := style.duplicate()
+	press_style.bg_color = Color(0.18, 0.18, 0.25, 1.0)
+	b.add_theme_stylebox_override("pressed", press_style)
+	b.pressed.connect(func():
+		Sfx.play("confirm")
+		cb.call())
+	b.mouse_entered.connect(func(): Sfx.play("bip"))
+	parent.add_child(b)
+	return b
+
+
 func _bg(parent: Control, col := Color.BLACK) -> void:
 	var r := ColorRect.new()
 	r.color = col
@@ -829,13 +858,15 @@ func show_defeat() -> void:
 	if not await _wait(6.0):
 		return
 	var box := HBoxContainer.new()
-	box.position = Vector2(400, 520)
+	box.add_theme_constant_override("separation", 20)
 	s.add_child(box)
 	_btn(box, "[ TENTAR NOVAMENTE ]", func():
 		Game.reset()
 		_flash()
 		start_game(false))
 	_btn(box, "[ MENU PRINCIPAL ]", show_menu)
+	await get_tree().process_frame
+	box.position = Vector2((1280 - box.size.x) * 0.5, 520)
 
 
 func show_victory() -> void:
@@ -926,16 +957,65 @@ func show_victory() -> void:
 	glitch.visible = false
 	_flash(0.3)
 
-	var title := _lbl(s, "O PARADOXO DO ESTAGIÁRIO", 36, y, Vector2(0, 200), 1280.0)
-	var sub := _lbl(s, "Missão Concluída", 20, white, Vector2(0, 260), 1280.0)
+	# Linha decorativa superior
+	var line_top := ColorRect.new()
+	line_top.size = Vector2(500, 2)
+	line_top.position = Vector2(390, 175)
+	line_top.color = Color(1.0, 0.85, 0.35, 0.4)
+	line_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	s.add_child(line_top)
+
+	var title := _lbl(s, "O  P A R A D O X O  D O  E S T A G I Á R I O", 32, y, Vector2(0, 190), 1280.0)
+	var sub := _lbl(s, "Missão Concluída", 18, white, Vector2(0, 240), 1280.0)
+
+	# Linha decorativa inferior
+	var line_bot := ColorRect.new()
+	line_bot.size = Vector2(300, 1)
+	line_bot.position = Vector2(490, 270)
+	line_bot.color = Color(0.5, 1.0, 0.95, 0.3)
+	line_bot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	s.add_child(line_bot)
+
+	# Subtítulo temático
+	var theme_lbl := _lbl(s, "\"O Efeito Borboleta foi implantado com sucesso.\"", 13, Color(0.5, 1.0, 0.95, 0.5), Vector2(0, 290), 1280.0)
+
 	if not await _wait(2.0):
 		return
+
+	# Container de botões centralizado
 	var box := VBoxContainer.new()
-	box.position = Vector2(480, 360)
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	box.position = Vector2(640, 400)
+	box.custom_minimum_size = Vector2(320, 0)
+	box.add_theme_constant_override("separation", 12)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	s.add_child(box)
-	_btn(box, "[ JOGAR NOVAMENTE ]", func():
+	# Ajustar posição para centralizar de verdade
+	await get_tree().process_frame
+	box.position = Vector2((1280 - box.size.x) * 0.5, 370)
+	_victory_btn(box, "[ JOGAR NOVAMENTE ]", Color(1.0, 0.85, 0.35), func():
 		Game.reset()
 		_flash()
 		start_game(false))
-	_btn(box, "[ CRÉDITOS ]", show_credits)
-	_btn(box, "[ MENU PRINCIPAL ]", show_menu)
+	_victory_btn(box, "[ CRÉDITOS ]", Color(0.5, 1.0, 0.95), show_credits)
+	_victory_btn(box, "[ MENU PRINCIPAL ]", Color(0.85, 0.92, 0.88), show_menu)
+	await get_tree().process_frame
+	box.position = Vector2((1280 - box.size.x) * 0.5, 370)
+
+	# Rodapé
+	_lbl(s, "Game Jam CIMATEC 2026.2  |  Tema: Efeito Borboleta", 11, Color(0.4, 0.55, 0.45, 0.4), Vector2(0, 680), 1280.0)
+
+	# Shimmer sutil no título
+	var my_t := seq_id
+	var shimmer := 0.0
+	while my_t == seq_id:
+		shimmer += 0.03
+		var pulse := 0.85 + 0.15 * sin(shimmer * 1.0)
+		title.modulate = Color(pulse, pulse * 0.95, pulse * 0.85)
+		if is_instance_valid(line_top):
+			line_top.color.a = 0.25 + 0.15 * sin(shimmer * 0.7)
+		if is_instance_valid(line_bot):
+			line_bot.color.a = 0.2 + 0.1 * sin(shimmer * 0.9 + 1.0)
+		await get_tree().create_timer(0.03).timeout

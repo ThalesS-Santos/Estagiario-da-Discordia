@@ -210,10 +210,19 @@ func walk_to(p: Vector2, run := false) -> void:
 func say(text: String, dur := 3.5) -> void:
 	bubble = text
 	bubble_t = dur
-	bubble_label.text = text.left(AIContract.MAX_DIALOGUE)
-	bubble_label.position = Vector2(-100 + randf_range(-30, 30), -118 + randf_range(-20, 10))
+	var t := text.left(AIContract.MAX_DIALOGUE)
+	bubble_label.text = t
+	var char_w := 6.0
+	var pad := 16.0
+	var text_w := t.length() * char_w + pad
+	var w := clampf(text_w, 40.0, 170.0)
+	bubble_label.size = Vector2(w, 0)
+	bubble_label.custom_minimum_size = Vector2(w, 0)
+	bubble_label.reset_size()
+	var half_w := w * 0.5
+	bubble_label.position = Vector2(-half_w + randf_range(-20, 20), -118 + randf_range(-15, 5))
 	bubble_label.visible = true
-	bubble_label.pivot_offset = Vector2(100, 64)
+	bubble_label.pivot_offset = Vector2(half_w, bubble_label.size.y * 0.5)
 	bubble_label.scale = Vector2.ZERO
 	if bubble_tween:
 		bubble_tween.kill()
