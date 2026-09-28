@@ -59,6 +59,8 @@ var sim_end := 0.0
 var crisis := false
 var day_revision := 0
 var sim_running := false
+var _instability_added_today := 0.0  # Feature 2: trava diária de instabilidade
+var _panic_tick := 0.0               # Feature 3: ticker de pânico visual dos NPCs
 var snapshot := {}
 var rings: Array = []
 var _active_event_current: Dictionary = {}
@@ -311,8 +313,17 @@ func _on_caos_gerado(data: Dictionary) -> void:
 				str(ev.get("description", "")),
 				float(ev.get("strength", 20)) * Game.get_difficulty().evidence_weight,
 				"", "", "", false)
+	# Softcap diário: dia 1 máx +25, dia 2 máx +40, dia 3 sem limite.
+	# Impede ganhar no dia 1 escrevendo o boato mais poderoso logo de cara.
+	var _daily_caps := {1: 25.0, 2: 40.0, 3: 999.0}
+	var _daily_cap: float = _daily_caps.get(Game.day, 999.0)
+	var _remaining_cap := maxf(_daily_cap - _instability_added_today, 0.0)
+	var _delta := minf(float(data.instability_delta), _remaining_cap)
+	_instability_added_today += maxf(_delta, 0.0)
+	if _delta < float(data.instability_delta) and float(data.instability_delta) > 0.0:
+		hud.toast("Os moradores ainda não estão convencidos o suficiente...", 3.0)
 	# This signal drives the existing HUD tween. Never add the delta again on end-day.
-	Game.add_instability(float(data.instability_delta))
+	Game.add_instability(_delta)
 	hud.toast("Instabilidade %+d%%" % int(data.instability_delta), 2.5)
 	_parse_ai_active_events(data)
 	_evaluate_chain_events()
@@ -606,6 +617,8 @@ func _start_day() -> void:
 		npc.suspicion_state = NPC.SuspicionState.CALM
 		npc._suspicion_decay_paused = false
 		npc._update_suspicion_state()
+	_instability_added_today = 0.0
+	_panic_tick = randf_range(2.5, 5.0)
 	_snapshot()
 	hud.new_day()
 	Game.world_checkpoint = _checkpoint()
@@ -686,18 +699,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	if intro_active or phase == Phase.TERMINAL or phase == Phase.CONFRONTATION or phase == Phase.ENDED:
 		return
 	if event is InputEventMouseButton and event.pressed:
-		match event.button_index:
-			MOUSE_BUTTON_LEFT:
-				_left_click()
-			MOUSE_BUTTON_RIGHT:
-				_right_click()
-			MOUSE_BUTTON_WHEEL_UP:
-				cam_zoom = clampf(cam_zoom + 0.07, 0.8, 1.5)
-			MOUSE_BUTTON_WHEEL_DOWN:
-				cam_zoom = clampf(cam_zoom - 0.07, 0.8, 1.5)
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			_left_click()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			_right_click()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			cam_zoom = clampf(cam_zoom + 0.07, 0.8, 1.5)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			cam_zoom = clampf(cam_zoom - 0.07, 0.8, 1.5)
 	elif event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_Z:
 			undo()
+		elif event.keycode == KEY_E:
+			if mission and mission.gate_is_open and not mission.player_crossed:
+				mission.try_open_gate()
 		elif event.keycode == KEY_END and OS.is_debug_build():
 			_debug_autoplay()
 		elif event.keycode == KEY_INSERT and OS.is_debug_build() and not held:
@@ -706,7 +721,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _debug_autoplay() -> void:
-	## Só desenvolvimento: joga uma ação completa sem depender do mouse.
+	## Auto-play a full turn for debugging purposes
 	if phase != Phase.ACTION or held:
 		return
 	_try_pick(objects["poison_vial"])
@@ -1303,52 +1318,219 @@ func _resolve(loc_name: String) -> Vector2:
 
 
 # ------------------------------------------------------------------ cutscenes
+const FIRE_TEX := preload("res://assets/gen/fx/building_fire.png")
+const CASTLE_FIRE_TEX := preload("res://assets/gen/fx/castle_fire.png")
+const WEAPONS_TEX := preload("res://assets/gen/props/revolt_weapons.png")
+const _REVOLT_SHOUTS := [
+	"Abaixo o Rei!", "Justiça!", "Chega de tirania!", "O povo não aguenta mais!",
+	"Peguem ele!", "Fogo no castelo!", "Libertem a vila!", "Morte ao tirano!",
+]
+const _FIRE_POSITIONS := [
+	Vector2(304, 420), Vector2(320, 430),   # padaria
+	Vector2(968, 420), Vector2(984, 430),   # ferraria
+	Vector2(112, 420),                       # residências
+]
+const _CASTLE_FIRE_POS := [
+	Vector2(600, 100), Vector2(660, 90), Vector2(640, 130),
+]
+
+
+func _spawn_fire(pos: Vector2, tex: Texture2D, fw: int, fh: int) -> AnimatedSprite2D:
+	var spr := AnimatedSprite2D.new()
+	var frames := SpriteFrames.new()
+	frames.add_animation("burn")
+	frames.set_animation_speed("burn", 6.0)
+	frames.set_animation_loop("burn", true)
+	var count := tex.get_width() / fw
+	for i in count:
+		var a := AtlasTexture.new()
+		a.atlas = tex
+		a.region = Rect2(i * fw, 0, fw, fh)
+		frames.add_frame("burn", a)
+	spr.sprite_frames = frames
+	spr.position = pos
+	spr.scale = Vector2(2, 2)
+	spr.z_index = 8
+	fx_root.add_child(spr)
+	spr.play("burn")
+	return spr
+
+
+func _give_weapon(npc: NPC) -> void:
+	var weapon_idx := randi() % 4
+	var a := AtlasTexture.new()
+	a.atlas = WEAPONS_TEX
+	a.region = Rect2(weapon_idx * 8, 0, 8, 16)
+	var spr := Sprite2D.new()
+	spr.texture = a
+	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.scale = Vector2(2, 2)
+	spr.position = Vector2(12 * npc.facing, -20)
+	spr.z_index = 1
+	npc.add_child(spr)
+
+
 func _victory_sequence() -> void:
 	crisis = true
-	for light in village.lights:
-		if light is PointLight2D:
-			light.color = Color(1.0, 0.25, 0.08)
 	hud.set_ui_visible(false)
 	hud.alarm()
-	Sfx.play("alarm")
 	follow = null
 	cam_zoom = 1.0
-	cam_target = Vector2(640, 300)
-	await get_tree().create_timer(1.2).timeout
-	var i := 0
+	player.input_enabled = false
+
+	# === FASE 1: Noite cai + alarme ===
+	Sfx.play("alarm")
+	clock = 21.0
+	var tw := create_tween()
+	tw.tween_property(mod, "color", Color("1a1a2e"), 2.0)
+	for light in village.lights:
+		if light is PointLight2D:
+			create_tween().tween_property(light, "color", Color(1.0, 0.25, 0.08), 1.5)
+	await get_tree().create_timer(2.0).timeout
+
+	# === FASE 2: Fogo nas casas ===
+	var fires: Array = []
+	for pos in _FIRE_POSITIONS:
+		fires.append(_spawn_fire(pos, FIRE_TEX, 16, 24))
+		emit_particle("fire_sparks", pos)
+		await get_tree().create_timer(0.3).timeout
+	Sfx.play("tension")
+	shake = 4.0
+	cam_target = Vector2(640, 450)
+	await get_tree().create_timer(1.5).timeout
+
+	# === FASE 3: NPCs pegam armas e gritam ===
+	var revolt_npcs: Array = []
+	var idx := 0
 	for id in npcs:
 		var n: NPC = npcs[id]
+		if id == "npc_king":
+			continue
 		n.ambient = false
 		n.get_up()
 		n.visible = true
-		if id == "npc_king":
-			continue
 		n.position = n.position if n.position.x > 0 else Vector2(640, 940)
-		n.walk_to(Game.loc_pos("castle_gate") + Vector2(-80 + i * 32, 70 + (i % 2) * 26), true)
-		n.say("Abaixo o Rei!" if i % 2 == 0 else "Justiça!", 4.0)
+		_give_weapon(n)
+		revolt_npcs.append(n)
+		n.say(_REVOLT_SHOUTS[idx % _REVOLT_SHOUTS.size()], 4.0)
+		n.show_emote("!", 3.0)
 		emit_particle("crowd_murmur", n.position)
-		i += 1
-	npcs["npc_smith"].walk_to(Game.loc_pos("castle_gate") + Vector2(0, 40), true)
+		idx += 1
+	for v: NPC in villagers:
+		v.ambient = false
+		v.get_up()
+		v.visible = true
+		_give_weapon(v)
+		v.say(_REVOLT_SHOUTS[randi() % _REVOLT_SHOUTS.size()], 4.0)
+		v.show_emote("!", 2.5)
+		revolt_npcs.append(v)
 	Sfx.play("murmur")
-	await get_tree().create_timer(6.0).timeout
+	await get_tree().create_timer(2.0).timeout
+
+	# === FASE 4: Todos marcham para o portão ===
+	cam_target = Vector2(640, 300)
+	for i2 in revolt_npcs.size():
+		var n: NPC = revolt_npcs[i2]
+		var offset := Vector2(-100 + (i2 % 6) * 36, 60 + (i2 / 6) * 28)
+		n.walk_to(Game.loc_pos("castle_gate") + offset, true)
+	Sfx.play("murmur")
+	await get_tree().create_timer(4.5).timeout
+
+	# === FASE 5: Portão abre + NPCs invadem castelo ===
 	gate_open = 1.0
+	shake = 6.0
 	Sfx.play("horn")
-	npcs["npc_king"].position = Vector2(640, 168)
-	npcs["npc_king"].show_emote("!", 4.0)
-	npcs["npc_king"].say("Isso é um absurdo!", 3.0)
+	await get_tree().create_timer(0.8).timeout
+	# Fogo no castelo
+	for pos in _CASTLE_FIRE_POS:
+		fires.append(_spawn_fire(pos, CASTLE_FIRE_TEX, 24, 32))
+		emit_particle("fire_sparks", pos)
+	cam_target = Vector2(640, 150)
+	for n: NPC in revolt_npcs:
+		n.walk_to(Vector2(640 + randf_range(-60, 60), 160 + randf_range(-20, 20)), true)
+	Sfx.play("tension")
+	await get_tree().create_timer(3.5).timeout
+
+	# === FASE 6: Rei aparece, pânico ===
+	var king: NPC = npcs["npc_king"]
+	king.position = Vector2(640, 168)
+	king.visible = true
+	king.get_up()
+	king.show_emote("!", 4.0)
+	king.say("Isso é um absurdo! Guardas!!", 4.0)
+	shake = 5.0
+	Sfx.play("thud")
+	await get_tree().create_timer(2.0).timeout
+
+	# === FASE 7: NPCs arrastam o rei até a praça ===
+	cam_target = Vector2(640, 400)
+	king.walk_to(Game.loc_pos("plaza"), true)
+	# Dois NPCs escoltam o rei
+	if revolt_npcs.size() >= 2:
+		revolt_npcs[0].walk_to(Game.loc_pos("plaza") + Vector2(-20, 0), true)
+		revolt_npcs[1].walk_to(Game.loc_pos("plaza") + Vector2(20, 0), true)
+	king.say("Soltem-me! Eu sou o Rei!", 4.0)
+	await get_tree().create_timer(4.0).timeout
+
+	# === FASE 8: Multidão cerca o rei na praça ===
+	var plaza := Game.loc_pos("plaza")
+	for i3 in revolt_npcs.size():
+		var n: NPC = revolt_npcs[i3]
+		var angle := float(i3) / float(revolt_npcs.size()) * TAU
+		var circle_pos := plaza + Vector2(cos(angle), sin(angle)) * 50.0
+		n.walk_to(circle_pos)
+	emit_particle("crowd_murmur", plaza)
+	emit_particle("anger_symbol", plaza + Vector2(0, -30))
+	Sfx.play("murmur")
+	king.position = plaza
+	king.show_emote("* *", 5.0)
+	king.say("Não... piedade...", 4.0)
 	await get_tree().create_timer(3.0).timeout
-	emit_particle("sparkle_gold", Vector2(640, 150))
-	emit_particle("sparkle_gold", Vector2(640, 170))
-	Sfx.play("coins")
-	shake = 8.0
-	create_tween().tween_property(self, "flag_drop", 1.0, 2.0)
-	npcs["npc_king"].fall()
-	await get_tree().create_timer(3.0).timeout
-	hud.flash()
-	for n in npcs.values() + villagers:
+
+	# === FASE 9: "Execução" não explícita — escurecimento + sons ===
+	shake = 10.0
+	Sfx.play("thud")
+	emit_particle("sparkle_red", plaza)
+	emit_particle("sparkle_red", plaza + Vector2(-20, 10))
+	emit_particle("sparkle_red", plaza + Vector2(20, -10))
+	await get_tree().create_timer(0.5).timeout
+	create_tween().tween_property(self, "flag_drop", 1.0, 1.5)
+
+	# Fade gradual para preto
+	var fade := ColorRect.new()
+	fade.color = Color(0, 0, 0, 0)
+	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fade.z_index = 50
+	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(fade)
+	tw = create_tween()
+	tw.tween_property(fade, "color:a", 1.0, 3.0)
+	Sfx.play("thud")
+	await get_tree().create_timer(1.0).timeout
+	king.fall()
+	for n: NPC in revolt_npcs:
+		n.say("" , 0.1)
+	await get_tree().create_timer(2.5).timeout
+
+	# Limpa fogos e armas
+	for f in fires:
+		if is_instance_valid(f):
+			f.queue_free()
+	for n: NPC in revolt_npcs:
+		for child in n.get_children():
+			if child is Sprite2D and child.texture is AtlasTexture and child.texture.atlas == WEAPONS_TEX:
+				child.queue_free()
 		n.moving = false
 		n.set_physics_process(false)
-	await get_tree().create_timer(0.6).timeout
+	king.moving = false
+	king.set_physics_process(false)
+
+	# Flash branco final
+	fade.color = Color(1, 1, 1, 1)
+	tw = create_tween()
+	tw.tween_property(fade, "color:a", 0.0, 0.8)
+	await tw.finished
+	fade.queue_free()
 
 
 var _defeat_reason := ""
@@ -1520,6 +1702,11 @@ func _process(delta: float) -> void:
 	if phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT or phase == Phase.PURSUIT:
 		_update_suspicion(delta)
 		check_player_escaped_pursuit()
+	if phase == Phase.ACTION:
+		_panic_tick -= delta
+		if _panic_tick <= 0.0:
+			_panic_tick = randf_range(2.5, 5.5)
+			_update_ambient_panic()
 
 
 const _SUSPICIOUS_TAGS := ["veneno", "arma", "real"]
@@ -1561,7 +1748,9 @@ func _update_suspicion(delta: float) -> void:
 
 		if base_rate > 0.0:
 			var rep_mod: Dictionary = Game.reputation_modifier(npc.id)
-			npc.add_suspicion(base_rate * exposure * susp_rate * float(rep_mod.suspicion_mult) * delta)
+			# Guardas ficam mais alertas conforme a instabilidade sobe: +50% a 50%, +100% a 100%
+			var instab_mult := 1.0 + clampf((Game.instability - 20.0) / 80.0, 0.0, 1.0)
+			npc.add_suspicion(base_rate * exposure * susp_rate * float(rep_mod.suspicion_mult) * delta * instab_mult)
 
 		# confronto: NPC aborda o jogador (evita repetição no mesmo ciclo)
 		if npc.suspicion_state == NPC.SuspicionState.CONFRONTING and not npc.moving and not npc.pursuing:
@@ -2066,6 +2255,52 @@ func _apply_event_effects(event_id: String) -> void:
 			})
 		"king_deposed":
 			Game.set_instability(100.0)
+
+
+func _update_ambient_panic() -> void:
+	var instab := Game.instability
+	if instab < 30.0:
+		return
+	var all_npcs: Array = npcs.values() + villagers
+	# Chance de reação aumenta com instabilidade: 0% em 30%, 60% em 100%
+	var panic_chance := clampf((instab - 30.0) / 70.0, 0.0, 1.0) * 0.6
+	var frases_leve := ["Algo está errado...", "Que estranho...", "Estou com mau pressentimento."]
+	var frases_alto := ["O que está acontecendo?!", "Isso é preocupante!", "Devemos nos reunir!"]
+	var frases_critico := ["O povo está em fúria!", "Isso vai acabar mal!", "Agentes do mal entre nós!"]
+	for npc: NPC in all_npcs:
+		if not npc.visible or not is_instance_valid(npc) or npc.pursuing or npc.fallen:
+			continue
+		if randf() > panic_chance:
+			continue
+		if instab >= 75.0:
+			npc.show_emote(["!", "!"][randi() % 2], 2.5)
+			if randf() < 0.5:
+				npc.say(frases_critico[randi() % frases_critico.size()], 3.5)
+				npc.hurt_mood(0.3, 0.3)
+			# NPCs correm em direção a outros para se agrupar
+			if randf() < 0.4 and not npc.moving:
+				var others := all_npcs.filter(func(o): return o != npc and is_instance_valid(o) and o.visible and not o.pursuing)
+				if not others.is_empty():
+					var target_npc: NPC = others[randi() % others.size()]
+					var gather_pos := target_npc.global_position + Vector2(randf_range(-24, 24), randf_range(-12, 12))
+					npc.walk_to(gather_pos, true)
+		elif instab >= 50.0:
+			npc.show_emote(["!", "?"][randi() % 2], 2.0)
+			if randf() < 0.35:
+				npc.say(frases_alto[randi() % frases_alto.size()], 3.0)
+			npc.hurt_mood(0.1, 0.1)
+		else:
+			if randf() < 0.25:
+				npc.show_emote("...", 1.8)
+				if randf() < 0.2:
+					npc.say(frases_leve[randi() % frases_leve.size()], 2.5)
+	# Em instabilidade alta: guardas aceleram patrulha e ficam em alerta base
+	if instab >= 60.0:
+		var guard: NPC = npcs.get("npc_guard")
+		if guard and is_instance_valid(guard) and not guard.pursuing and not guard.fallen:
+			if not guard.moving and guard.ambient:
+				guard.show_emote("!", 1.5)
+				guard.say("Preciso ficar de olho...", 2.5)
 
 
 func _update_cam(_delta: float) -> void:

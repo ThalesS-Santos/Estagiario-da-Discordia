@@ -27,6 +27,7 @@ var clues_found  : Array[String] = []
 var suspicion     := 0.0
 var gate_is_open  := false
 var gate_timer    := 0.0
+var gate_prompt_visible := false
 var catch_count   := 0
 var mission_ended := false
 var player_crossed := false
@@ -255,15 +256,41 @@ func _tick_passive_clues(delta: float) -> void:
 
 func _tick_crossing() -> void:
 	if player_crossed or mission_ended or not is_instance_valid(_player):
+		if gate_prompt_visible:
+			gate_prompt_visible = false
+			if _hud:
+				_hud.hide_gate_prompt()
 		return
 	var pp: Vector2 = _player.global_position
-	# O jogador cruzou o portão (chegou ao lado norte)
-	if gate_is_open and pp.y < GATE_Y_CROSS and pp.x > 568.0 and pp.x < 712.0:
-		player_crossed = true
-		mission_ended  = true
-		phase = MPhase.ENDED
-		Game.event_flags["player_crossed_gate"] = true
-		mission_success.emit()
+	var near_gate := gate_is_open and pp.distance_to(GATE_POS) < GATE_NEAR_DIST
+	if near_gate and not gate_prompt_visible:
+		gate_prompt_visible = true
+		if _hud:
+			_hud.show_gate_prompt()
+	elif not near_gate and gate_prompt_visible:
+		gate_prompt_visible = false
+		if _hud:
+			_hud.hide_gate_prompt()
+
+
+func try_open_gate() -> bool:
+	if not gate_is_open or player_crossed or mission_ended:
+		return false
+	if not is_instance_valid(_player):
+		return false
+	if _player.global_position.distance_to(GATE_POS) > GATE_NEAR_DIST:
+		if _hud:
+			_hud.toast("Chegue mais perto do portão.", 2.0)
+		return false
+	player_crossed = true
+	mission_ended = true
+	phase = MPhase.ENDED
+	gate_prompt_visible = false
+	if _hud:
+		_hud.hide_gate_prompt()
+	Game.event_flags["player_crossed_gate"] = true
+	mission_success.emit()
+	return true
 
 
 func _osric_catches_player() -> void:

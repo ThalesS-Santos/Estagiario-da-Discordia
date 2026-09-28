@@ -42,10 +42,13 @@ var flash_rect: ColorRect
 var alarm_rect: ColorRect
 # missão
 var mission_panel: NinePatchRect
+var mission_toggle_btn: Button
+var mission_panel_visible := false
 var mission_obj_label: Label
 var mission_clues_vbox: VBoxContainer
 var _mission_clue_labels: Dictionary = {}
 var _mission_panel_tween: Tween
+var _mission_autohide_timer: SceneTreeTimer
 var suspicion_panel: NinePatchRect
 var suspicion_bar: TextureProgressBar
 var opportunity_panel: NinePatchRect
@@ -97,8 +100,12 @@ var event_log_panel: NinePatchRect
 var _event_log: Array[String] = []
 # cadeia causal
 var chain_panel: NinePatchRect
+var chain_toggle_btn: Button
+var chain_panel_visible := false
 var chain_vbox: VBoxContainer
+var _chain_autohide_timer: SceneTreeTimer
 var tut_step := 0
+var _gate_prompt: Label
 var _tex_cache: Dictionary = {}
 
 # ---- texturas pré-carregadas
@@ -227,31 +234,46 @@ func _label(text: String, sz: int, col: Color) -> Label:
 
 # ================================================================ MISSÃO UI
 func _build_mission_panel() -> void:
-	mission_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(220, 52))
+	# --- painel deslizante (começa fora da tela à esquerda) ---
+	mission_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(260, 52))
 	mission_panel.position = Vector2(10, 96)
 	mission_panel.visible = false
 	ui.add_child(mission_panel)
+
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scroll.offset_left = 8
+	scroll.offset_top = 6
+	scroll.offset_right = -8
+	scroll.offset_bottom = -6
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.mouse_filter = Control.MOUSE_FILTER_PASS
+	mission_panel.add_child(scroll)
+
 	var v := VBoxContainer.new()
-	v.set_anchors_preset(Control.PRESET_FULL_RECT)
-	v.add_theme_constant_override("separation", 2)
-	v.offset_left = 8
-	v.offset_top = 6
-	v.offset_right = -8
-	v.offset_bottom = -6
-	mission_panel.add_child(v)
+	v.add_theme_constant_override("separation", 3)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(v)
+
 	var header := _label("MISSÃO", 10, Color(1.0, 0.82, 0.2))
 	v.add_child(header)
-	mission_obj_label = _label("Descubra como afastar o guarda.", 11, Color(0.92, 0.92, 0.92))
+	mission_obj_label = _label("", 11, Color(0.92, 0.92, 0.92))
 	mission_obj_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	mission_obj_label.custom_minimum_size = Vector2(240, 0)
 	v.add_child(mission_obj_label)
-	# separador
-	var sep := _label("─────────────────", 9, Color(0.4, 0.5, 0.45))
+	var sep := _label("─────────────────────", 9, Color(0.4, 0.5, 0.45))
 	v.add_child(sep)
-	# lista de pistas
 	mission_clues_vbox = VBoxContainer.new()
-	mission_clues_vbox.add_theme_constant_override("separation", 1)
+	mission_clues_vbox.add_theme_constant_override("separation", 2)
 	mission_clues_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(mission_clues_vbox)
+
+	# --- botão toggle fixo na lateral (oculto até missão iniciar) ---
+	mission_toggle_btn = _build_side_toggle_btn("MISSÃO", Vector2(10, 96), false)
+	mission_toggle_btn.pressed.connect(_toggle_mission_panel)
+	mission_toggle_btn.visible = false
+	ui.add_child(mission_toggle_btn)
 
 
 func _build_suspicion_panel() -> void:
@@ -292,6 +314,31 @@ func _build_opportunity_panel() -> void:
 	opportunity_timer_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	opportunity_timer_label.offset_bottom = -8
 	opportunity_panel.add_child(opportunity_timer_label)
+
+
+func show_gate_prompt() -> void:
+	if not _gate_prompt:
+		_gate_prompt = _label("Pressione  E  para abrir o portão", 18, Color(1.0, 0.85, 0.2))
+		_gate_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_gate_prompt.position = Vector2(390, 270)
+		_gate_prompt.size = Vector2(500, 32)
+		_gate_prompt.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+		_gate_prompt.add_theme_constant_override("outline_size", 5)
+		ui.add_child(_gate_prompt)
+	_gate_prompt.visible = true
+	var tw := create_tween().set_loops()
+	tw.tween_property(_gate_prompt, "modulate:a", 0.5, 0.5)
+	tw.tween_property(_gate_prompt, "modulate:a", 1.0, 0.5)
+	_gate_prompt.set_meta("tween", tw)
+
+
+func hide_gate_prompt() -> void:
+	if _gate_prompt:
+		if _gate_prompt.has_meta("tween"):
+			var tw: Tween = _gate_prompt.get_meta("tween")
+			if tw:
+				tw.kill()
+		_gate_prompt.visible = false
 
 
 func _build_clue_popup() -> void:
@@ -699,8 +746,8 @@ func _scroll_event_log_to_end() -> void:
 
 # ---- cadeia causal ----------------------------------------------------------
 func _build_chain_panel() -> void:
-	chain_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(240, 180))
-	chain_panel.position = Vector2(1280 - 254, 200)
+	chain_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(250, 180))
+	chain_panel.position = Vector2(1280 - 262, 200)
 	chain_panel.visible = false
 	chain_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(chain_panel)
@@ -709,42 +756,156 @@ func _build_chain_panel() -> void:
 	chain_panel.add_child(title)
 	chain_vbox = VBoxContainer.new()
 	chain_vbox.position = Vector2(10, 24)
-	chain_vbox.add_theme_constant_override("separation", 3)
+	chain_vbox.add_theme_constant_override("separation", 4)
 	chain_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	chain_panel.add_child(chain_vbox)
+	# botão toggle (oculto até haver eventos)
+	chain_toggle_btn = _build_side_toggle_btn("EVENTOS", Vector2(1280 - 90, 200), true)
+	chain_toggle_btn.pressed.connect(_toggle_chain_panel)
+	chain_toggle_btn.visible = false
+	ui.add_child(chain_toggle_btn)
 
 
 func update_chain_panel(events: Array) -> void:
 	for c in chain_vbox.get_children():
 		c.queue_free()
 	if events.is_empty():
-		chain_panel.visible = false
+		_set_chain_panel_visible(false)
+		chain_toggle_btn.visible = false
 		return
-	chain_panel.visible = true
+	chain_toggle_btn.visible = true
 	for ev in events:
-		var icon := "✓" if ev.get("done", false) else ("→" if ev.get("active", false) else "○")
-		var col := Color(0.4, 0.85, 0.4) if ev.get("done", false) else (Color(1.0, 0.85, 0.35) if ev.get("active", false) else Color(0.5, 0.6, 0.55))
-		var lbl := _label("%s %s" % [icon, str(ev.get("label", ""))], 11, col)
-		chain_vbox.add_child(lbl)
-	chain_panel.size.y = 24.0 + events.size() * 18.0
+		var done: bool = ev.get("done", false)
+		var active: bool = ev.get("active", false)
+		var icon := "✓" if done else ("▶" if active else "○")
+		var col := Color(0.4, 0.85, 0.4) if done else (Color(1.0, 0.85, 0.35) if active else Color(0.5, 0.6, 0.55))
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var icon_l := _label(icon, 11, col)
+		icon_l.custom_minimum_size.x = 14
+		row.add_child(icon_l)
+		var name_l := _label(str(ev.get("label", "")), 11, col)
+		name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		name_l.custom_minimum_size = Vector2(200, 0)
+		name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_l)
+		chain_vbox.add_child(row)
+	var new_h := 28.0 + events.size() * 20.0
+	chain_panel.size.y = clampf(new_h, 52.0, 280.0)
+	# auto-show com auto-hide somente se o painel ainda não estava visível
+	if not chain_panel_visible:
+		_set_chain_panel_visible(true)
+		_autohide_chain(4.0)
 
 
 # ---- API pública da missão -------------------------------------------------
+func _build_side_toggle_btn(label: String, panel_pos: Vector2, right_side: bool) -> Button:
+	var btn := Button.new()
+	btn.text = label
+	btn.flat = true
+	btn.custom_minimum_size = Vector2(80, 22)
+	btn.add_theme_font_size_override("font_size", 10)
+	btn.add_theme_color_override("font_color", Color(1.0, 0.82, 0.2, 0.85))
+	btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 0.6))
+	btn.add_theme_color_override("font_pressed_color", Color(1.0, 1.0, 1.0))
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.1, 0.06, 0.88)
+	sb.border_color = Color(0.8, 0.65, 0.1, 0.6)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(2)
+	sb.content_margin_left = 6
+	sb.content_margin_right = 6
+	sb.content_margin_top = 3
+	sb.content_margin_bottom = 3
+	btn.add_theme_stylebox_override("normal", sb)
+	var sbh := sb.duplicate() as StyleBoxFlat
+	sbh.bg_color = Color(0.14, 0.16, 0.08, 0.95)
+	sbh.border_color = Color(1.0, 0.85, 0.2, 0.9)
+	btn.add_theme_stylebox_override("hover", sbh)
+	btn.add_theme_stylebox_override("pressed", sbh)
+	btn.mouse_entered.connect(func(): Sfx.play("bip"))
+	if right_side:
+		btn.position = Vector2(panel_pos.x, panel_pos.y - 28)
+	else:
+		btn.position = Vector2(panel_pos.x, panel_pos.y - 28)
+	return btn
+
+
+func _toggle_mission_panel() -> void:
+	mission_panel_visible = not mission_panel_visible
+	_set_mission_panel_visible(mission_panel_visible)
+
+
+func _set_mission_panel_visible(v: bool) -> void:
+	mission_panel_visible = v
+	if v:
+		mission_panel.modulate.a = 0.0
+		mission_panel.visible = true
+		create_tween().tween_property(mission_panel, "modulate:a", 1.0, 0.18)
+		mission_toggle_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 0.5))
+	else:
+		var tw := create_tween()
+		tw.tween_property(mission_panel, "modulate:a", 0.0, 0.15)
+		tw.tween_callback(func(): mission_panel.visible = false)
+		mission_toggle_btn.add_theme_color_override("font_color", Color(1.0, 0.82, 0.2, 0.85))
+
+
+func _toggle_chain_panel() -> void:
+	chain_panel_visible = not chain_panel_visible
+	_set_chain_panel_visible(chain_panel_visible)
+
+
+func _set_chain_panel_visible(v: bool) -> void:
+	chain_panel_visible = v
+	if v:
+		chain_panel.modulate.a = 0.0
+		chain_panel.visible = true
+		create_tween().tween_property(chain_panel, "modulate:a", 1.0, 0.18)
+		chain_toggle_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 0.5))
+	else:
+		var tw := create_tween()
+		tw.tween_property(chain_panel, "modulate:a", 0.0, 0.15)
+		tw.tween_callback(func(): chain_panel.visible = false)
+		chain_toggle_btn.add_theme_color_override("font_color", Color(1.0, 0.82, 0.2, 0.85))
+
+
+func _autohide_mission(delay: float) -> void:
+	if _mission_autohide_timer != null:
+		return
+	_mission_autohide_timer = get_tree().create_timer(delay)
+	_mission_autohide_timer.timeout.connect(func():
+		_mission_autohide_timer = null
+		_set_mission_panel_visible(false))
+
+
+func _autohide_chain(delay: float) -> void:
+	if _chain_autohide_timer != null:
+		return
+	_chain_autohide_timer = get_tree().create_timer(delay)
+	_chain_autohide_timer.timeout.connect(func():
+		_chain_autohide_timer = null
+		_set_chain_panel_visible(false))
+
+
 func show_mission_briefing() -> void:
-	mission_panel.visible = true
+	mission_toggle_btn.visible = true
+	_set_mission_panel_visible(true)
 	_resize_mission_panel()
+	_autohide_mission(4.0)
 
 
 func set_mission_objective(text: String) -> void:
 	mission_obj_label.text = text
-	mission_panel.visible = true
-	# pulso amarelo para chamar atenção
+	mission_toggle_btn.visible = true
+	_set_mission_panel_visible(true)
 	if _mission_panel_tween:
 		_mission_panel_tween.kill()
 	_mission_panel_tween = create_tween()
 	_mission_panel_tween.tween_property(mission_panel, "modulate", Color(1.6, 1.4, 0.5, 1.0), 0.15)
 	_mission_panel_tween.tween_property(mission_panel, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.4)
 	_resize_mission_panel()
+	_autohide_mission(4.0)
 
 
 func set_mission_clues(clues: Array) -> void:
@@ -780,10 +941,9 @@ func mark_clue_found(clue_id: String) -> void:
 
 
 func _resize_mission_panel() -> void:
-	## Ajusta a altura do painel ao conteúdo real.
 	await get_tree().process_frame
 	var h: float = mission_panel.get_combined_minimum_size().y
-	mission_panel.size.y = maxf(h, 52.0)
+	mission_panel.size.y = clampf(h, 52.0, 300.0)
 
 
 func set_suspicion(val: float) -> void:
