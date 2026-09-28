@@ -1608,22 +1608,41 @@ func _build_pause() -> void:
 	pause_panel.visible = false
 	var dim := ColorRect.new()
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0, 0, 0, 0.7)
+	dim.color = Color(0.02, 0.05, 0.03, 0.82)
 	pause_panel.add_child(dim)
-	var pc := _9patch(tex_panel, [4, 4, 4, 4], Vector2(280, 0))
+	# Linhas de scanline sutis para dar cara "terminal"
+	for i in range(0, 720, 3):
+		var scan := ColorRect.new()
+		scan.color = Color(0.3, 1.0, 0.5, 0.03)
+		scan.position = Vector2(0, i)
+		scan.size = Vector2(1280, 1)
+		scan.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pause_panel.add_child(scan)
+	var pc := _9patch(tex_panel, [4, 4, 4, 4], Vector2(320, 0))
 	pc.name = "Menu"
-	pc.position = Vector2(500, 200)
+	pc.position = Vector2(480, 170)
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_bottom", 12)
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_bottom", 16)
 	pc.add_child(margin)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", 8)
 	margin.add_child(v)
-	v.add_child(_label("PAUSA", 22, Color(1.0, 0.85, 0.35)))
-	for item in [["CONTINUAR", "resume"], ["REINICIAR DIA", "restart"], ["CONFIGURAÇÕES", "settings"], ["MENU PRINCIPAL", "menu"], ["SAIR", "quit"]]:
+	v.add_child(_label("// SISTEMA PAUSADO //", 12, Color(0.45, 0.9, 0.55, 0.65)))
+	var title := _label("PAUSA", 26, Color(1.0, 0.85, 0.35))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(title)
+	var sub := _label("Agência Panóptico — expediente suspenso.", 11, Color(0.6, 0.8, 0.7, 0.55))
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(sub)
+	# Separador
+	var sep := ColorRect.new()
+	sep.color = Color(0.35, 0.9, 0.55, 0.35)
+	sep.custom_minimum_size = Vector2(0, 1)
+	v.add_child(sep)
+	for item in [["CONTINUAR", "resume"], ["CONFIGURAÇÕES", "settings"], ["MENU PRINCIPAL", "menu"], ["SAIR", "quit"]]:
 		var b := Button.new()
 		b.text = item[0]
 		b.pressed.connect(_pause_action.bind(item[1]))
@@ -1647,6 +1666,14 @@ func _build_pause() -> void:
 		b.add_theme_color_override("font_color", Color(0.85, 1.0, 0.9))
 		b.add_theme_color_override("font_hover_color", Color(1.0, 0.85, 0.35))
 		v.add_child(b)
+	# Rodapé com dica de tecla
+	var sep2 := ColorRect.new()
+	sep2.color = Color(0.35, 0.9, 0.55, 0.25)
+	sep2.custom_minimum_size = Vector2(0, 1)
+	v.add_child(sep2)
+	var footer := _label("[ESC] retomar", 10, Color(0.5, 0.75, 0.6, 0.55))
+	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(footer)
 	pause_panel.add_child(pc)
 	ui.add_child(pause_panel)
 
