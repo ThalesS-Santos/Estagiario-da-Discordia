@@ -3612,7 +3612,7 @@ func _npc_social_interactions(all_npcs: Array, instab: float) -> void:
 	var pairs: Array = []
 	for i in valid.size():
 		for j in range(i + 1, valid.size()):
-			var dist := valid[i].global_position.distance_to(valid[j].global_position)
+			var dist: float = valid[i].global_position.distance_to(valid[j].global_position)
 			if dist < 80.0:
 				pairs.append([valid[i], valid[j]])
 	if pairs.is_empty():
