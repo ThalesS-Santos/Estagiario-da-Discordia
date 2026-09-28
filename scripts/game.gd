@@ -1136,6 +1136,8 @@ func save_settings() -> void:
 
 func apply_settings() -> void:
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(float(settings.master), 0.001)))
+	if is_instance_valid(get_node_or_null("/root/Music")):
+		get_node("/root/Music").set_volume(float(settings.music))
 	match int(settings.resolution):
 		0:
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
