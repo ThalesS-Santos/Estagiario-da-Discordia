@@ -1461,69 +1461,157 @@ func _has_weapon(npc: NPC) -> bool:
 	return false
 
 
-## Disparado assim que a instabilidade chega a 100%: começa a revolta imediatamente,
-## sem esperar o jogador terminar o dia. Bram some do portão e o portão fica aberto
-## até o jogador chegar lá e apertar E — o resto da cena acontece em _victory_sequence().
+## Disparado assim que a instabilidade chega a 100%: sequência cinematográfica completa.
+## 1) Transição suave de dia para noite
+## 2) NPCs vão à ferraria pegar armas
+## 3) Saem tacando fogo pela vila
+## 4) Guardas vão à praça proteger o Rei; população avança e mata os guardas
+## 5) Jogador abre o portão → NPCs invadem e matam o Rei
 func _start_revolt() -> void:
 	if _revolt_active:
 		return
 	_revolt_active = true
-	crisis = true
-	hud.toast("A INSTABILIDADE CHEGOU AO LIMITE! O povo pega em armas!", 5.0)
+	player.input_enabled = false
+	hud.toast("A INSTABILIDADE CHEGOU AO LIMITE!", 4.0)
 	hud.set_revolt_mode()
 	Music.trigger_revolt()
+
+	# --- Desabilita cones de visão dos guardas e do ancião ---
+	for cone_id in ["npc_guard", "npc_guard2", "npc_king"]:
+		var cn: NPC = npcs.get(cone_id)
+		if cn and is_instance_valid(cn):
+			cn.disable_vision_cone()
+	for cv: NPC in villagers:
+		if cv.id == "villager_elder":
+			cv.disable_vision_cone()
+
+	# === FASE 1: Transição suave de dia → noite (8 segundos) ===
+	# Animamos o clock — _ambient() em _process calcula a cor certa automaticamente.
+	# crisis fica false durante a transição para _ambient() funcionar.
+	var transition_tw := create_tween()
+	transition_tw.tween_property(self, "clock", 21.0, 8.0).from(clock)
+	for light in village.lights:
+		if light is PointLight2D:
+			create_tween().tween_property(light, "energy", 1.5, 6.0)
+
+	# === FASE 2: Enquanto escurece, NPCs (não-guardas) vão à ferraria pegar armas ===
+	var revolt_civilians: Array[NPC] = []
+	var forge_pos := Game.loc_pos("forge")
+	for npc_id in npcs:
+		if npc_id == "npc_king" or npc_id == "npc_guard" or npc_id == "npc_guard2":
+			continue
+		var n: NPC = npcs[npc_id]
+		n.ambient = false
+		n.show_emote("!", 2.5)
+		revolt_civilians.append(n)
+	for v: NPC in villagers:
+		v.ambient = false
+		v.show_emote("!", 2.5)
+		revolt_civilians.append(v)
+
+	# Todos caminham em direção à ferraria em formação
+	for i in revolt_civilians.size():
+		var n: NPC = revolt_civilians[i]
+		var offset := Vector2(randf_range(-50, 50), randf_range(-30, 40))
+		n.walk_to(forge_pos + offset)
+	Sfx.play("murmur")
+	hud.toast("O povo marcha até a ferraria...", 3.5)
+
+	# Espera chegarem (ou timeout de 5s)
+	await get_tree().create_timer(5.0).timeout
+
+	# === FASE 3: Pegam armas na ferraria ===
+	Sfx.play("tension")
+	shake = 3.0
+	for n: NPC in revolt_civilians:
+		_give_weapon(n)
+		n.say(_REVOLT_SHOUTS[randi() % _REVOLT_SHOUTS.size()], 3.0)
+	hud.toast("O povo pega em armas!", 3.0)
+	await get_tree().create_timer(2.5).timeout
+
+	# === FASE 4: Saem tacando fogo pela vila ===
+	# Primeiro espalham-se pela vila
+	var fire_targets := [
+		Game.loc_pos("bakery"),
+		Game.loc_pos("residence"),
+		Game.loc_pos("plaza"),
+	]
+	for i in revolt_civilians.size():
+		var target_pos: Vector2 = fire_targets[i % fire_targets.size()]
+		var n: NPC = revolt_civilians[i]
+		n.walk_to(target_pos + Vector2(randf_range(-40, 40), randf_range(-20, 20)), true)
+
+	await get_tree().create_timer(2.0).timeout
+
+	# Fogos aparecem progressivamente enquanto eles passam
+	for i_fire in _FIRE_POSITIONS.size():
+		_revolt_fires.append(_spawn_fire(_FIRE_POSITIONS[i_fire], FIRE_TEX, 16, 24))
+		emit_particle("fire_sparks", _FIRE_POSITIONS[i_fire])
+		await get_tree().create_timer(0.8).timeout
+	shake = 5.0
 	Sfx.play("alarm")
-	clock = 21.0
-	var tw := create_tween()
-	tw.tween_property(mod, "color", Color("1a1a2e"), 2.5)
+
+	# Luzes ficam vermelhas com o fogo
 	for light in village.lights:
 		if light is PointLight2D:
 			create_tween().tween_property(light, "color", Color(1.0, 0.25, 0.08), 2.0)
-	await get_tree().create_timer(1.0).timeout
+	await get_tree().create_timer(1.5).timeout
 
-	for pos in _FIRE_POSITIONS:
-		_revolt_fires.append(_spawn_fire(pos, FIRE_TEX, 16, 24))
-		emit_particle("fire_sparks", pos)
-	shake = 4.0
-	Sfx.play("tension")
-	await get_tree().create_timer(0.6).timeout
+	# === FASE 5: Guardas vão à praça proteger o Rei ===
+	crisis = true
+	var plaza := Game.loc_pos("plaza")
 
-	for id in npcs:
-		if id == "npc_king" or id == "npc_guard" or id == "npc_guard2":
-			continue
-		var n: NPC = npcs[id]
-		n.ambient = false
-		_give_weapon(n)
-		n.say(_REVOLT_SHOUTS[randi() % _REVOLT_SHOUTS.size()], 4.0)
-		n.show_emote("!", 3.0)
-		n.walk_to(Game.loc_pos("castle_gate") + Vector2(randf_range(-90, 90), randf_range(50, 90)), true)
-	for v: NPC in villagers:
-		v.ambient = false
-		_give_weapon(v)
-		v.say(_REVOLT_SHOUTS[randi() % _REVOLT_SHOUTS.size()], 3.0)
-		v.walk_to(Game.loc_pos("castle_gate") + Vector2(randf_range(-90, 90), randf_range(50, 90)), true)
-	Sfx.play("murmur")
-
-	# Bram entra em pânico e abandona o portão — a missão continua sendo tirá-lo de lá,
-	# só que agora é a própria revolta que o tira, não mais uma distração criada aos poucos.
 	var guard: NPC = npcs.get("npc_guard")
 	if guard and is_instance_valid(guard):
-		guard.say("A vila está em revolta! Não posso segurar sozinho!", 4.0)
+		guard.ambient = false
+		guard.say("Protejam o Rei! Todos ao centro!", 4.0)
 		guard.show_emote("!", 3.0)
-		guard.walk_to(Game.loc_pos("plaza"), true)
-	# Renato tenta ajudar Bram, mas os dois são dominados pela multidão — não impede o jogador.
+		guard.walk_to(plaza + Vector2(-25, 0), true)
 	var guard2: NPC = npcs.get("npc_guard2")
 	if guard2 and is_instance_valid(guard2):
 		guard2.ambient = false
-		guard2.say("Bram! Preciso de você no portão!", 3.5)
+		guard2.say("Fiquem para trás! Em nome do Rei!", 3.5)
 		guard2.show_emote("!", 2.5)
-		guard2.walk_to(Game.loc_pos("plaza"), true)
+		guard2.walk_to(plaza + Vector2(25, 0), true)
 
+	await get_tree().create_timer(2.0).timeout
+
+	# === FASE 6: População avança e cerca os guardas na praça ===
+	Sfx.play("murmur")
+	for i in revolt_civilians.size():
+		var n: NPC = revolt_civilians[i]
+		var angle := float(i) / float(revolt_civilians.size()) * TAU
+		var circle_pos := plaza + Vector2(cos(angle), sin(angle)) * 55.0
+		n.walk_to(circle_pos, true)
+		n.say(_REVOLT_SHOUTS[randi() % _REVOLT_SHOUTS.size()], 3.0)
+
+	await get_tree().create_timer(3.0).timeout
+
+	# Guardas são mortos pela multidão
+	shake = 8.0
+	Sfx.play("thud")
+	emit_particle("sparkle_red", plaza + Vector2(-25, 0))
+	emit_particle("sparkle_red", plaza + Vector2(25, 0))
+	await get_tree().create_timer(0.5).timeout
+
+	if guard and is_instance_valid(guard):
+		guard.say("Não... o Rei...", 2.0)
+		guard.fall()
+		guard.moving = false
+		guard.set_physics_process(false)
+	if guard2 and is_instance_valid(guard2):
+		guard2.fall()
+		guard2.moving = false
+		guard2.set_physics_process(false)
+
+	Sfx.play("thud")
+	await get_tree().create_timer(1.5).timeout
+
+	# === FASE 7: Portão fica aberto, jogador deve ir lá ===
 	if mission:
 		mission.force_gate_open_from_revolt()
-
-	await get_tree().create_timer(1.2).timeout
-	hud.toast("O portão está desguarnecido! Corra até lá e pressione E.", 5.0)
+	player.input_enabled = true
+	hud.toast("Os guardas caíram! Corra até o portão e pressione E!", 6.0)
 
 
 func _victory_sequence() -> void:
@@ -1535,19 +1623,25 @@ func _victory_sequence() -> void:
 	player.input_enabled = false
 
 	if not _revolt_active:
-		# Jogador venceu pela cadeia de missão sem ter passado por 100% de instabilidade antes —
-		# toca aqui a abertura da revolta que normalmente já teria acontecido.
 		_revolt_active = true
 		hud.set_revolt_mode()
 		Music.trigger_revolt()
 		Sfx.play("alarm")
-		clock = 21.0
+		# Transição suave de dia → noite via clock (o _ambient() calcula a cor)
 		var tw0 := create_tween()
-		tw0.tween_property(mod, "color", Color("1a1a2e"), 2.0)
+		tw0.tween_property(self, "clock", 21.0, 6.0).from(clock)
 		for light in village.lights:
 			if light is PointLight2D:
-				create_tween().tween_property(light, "color", Color(1.0, 0.25, 0.08), 1.5)
-		await get_tree().create_timer(2.0).timeout
+				create_tween().tween_property(light, "color", Color(1.0, 0.25, 0.08), 4.0)
+		# Desabilita cones de visão
+		for cone_id2 in ["npc_guard", "npc_guard2", "npc_king"]:
+			var dn: NPC = npcs.get(cone_id2)
+			if dn and is_instance_valid(dn):
+				dn.disable_vision_cone()
+		for dv: NPC in villagers:
+			if dv.id == "villager_elder":
+				dv.disable_vision_cone()
+		await get_tree().create_timer(3.0).timeout
 		for pos in _FIRE_POSITIONS:
 			_revolt_fires.append(_spawn_fire(pos, FIRE_TEX, 16, 24))
 			emit_particle("fire_sparks", pos)
@@ -1557,7 +1651,7 @@ func _victory_sequence() -> void:
 		cam_target = Vector2(640, 450)
 		await get_tree().create_timer(1.0).timeout
 
-	# === Reúne a multidão armada (já pode estar armada, se a revolta já tinha começado) ===
+	# === Reúne a multidão armada (já armada se a revolta já aconteceu) ===
 	var revolt_npcs: Array = []
 	for id in npcs:
 		if id == "npc_king" or id == "npc_guard" or id == "npc_guard2":
@@ -1580,7 +1674,7 @@ func _victory_sequence() -> void:
 		revolt_npcs.append(v)
 	Sfx.play("murmur")
 
-	# === Todos marcham para o portão ===
+	# === NPCs vivos marcham para o portão (guardas já morreram na praça) ===
 	cam_target = Vector2(640, 300)
 	for i2 in revolt_npcs.size():
 		var n: NPC = revolt_npcs[i2]
@@ -1588,12 +1682,11 @@ func _victory_sequence() -> void:
 		n.walk_to(Game.loc_pos("castle_gate") + offset, true)
 	await get_tree().create_timer(2.5).timeout
 
-	# === Portão abre + NPCs invadem castelo ===
+	# === Portão abre + NPCs invadem o palácio ===
 	gate_open = 1.0
 	shake = 6.0
 	Sfx.play("horn")
 	await get_tree().create_timer(0.8).timeout
-	# Fogo no castelo
 	for pos in _CASTLE_FIRE_POS:
 		_revolt_fires.append(_spawn_fire(pos, CASTLE_FIRE_TEX, 24, 32))
 		emit_particle("fire_sparks", pos)
@@ -1603,29 +1696,29 @@ func _victory_sequence() -> void:
 	Sfx.play("tension")
 	await get_tree().create_timer(3.5).timeout
 
-	# === FASE 6: Rei aparece, pânico ===
+	# === Rei aparece, chama os guardas (que já estão mortos) ===
 	var king: NPC = npcs["npc_king"]
 	king.position = Vector2(640, 168)
 	king.visible = true
 	king.get_up()
+	king.disable_vision_cone()
 	king.show_emote("!", 4.0)
 	king.say("Isso é um absurdo! Guardas!!", 4.0)
 	shake = 5.0
 	Sfx.play("thud")
 	await get_tree().create_timer(2.0).timeout
 
-	# === FASE 7: NPCs arrastam o rei até a praça ===
+	# === NPCs arrastam o rei até a praça (onde os guardas já jazem mortos) ===
+	var plaza := Game.loc_pos("plaza")
 	cam_target = Vector2(640, 400)
-	king.walk_to(Game.loc_pos("plaza"), true)
-	# Dois NPCs escoltam o rei
+	king.walk_to(plaza, true)
 	if revolt_npcs.size() >= 2:
-		revolt_npcs[0].walk_to(Game.loc_pos("plaza") + Vector2(-20, 0), true)
-		revolt_npcs[1].walk_to(Game.loc_pos("plaza") + Vector2(20, 0), true)
+		revolt_npcs[0].walk_to(plaza + Vector2(-20, 0), true)
+		revolt_npcs[1].walk_to(plaza + Vector2(20, 0), true)
 	king.say("Soltem-me! Eu sou o Rei!", 4.0)
 	await get_tree().create_timer(4.0).timeout
 
-	# === FASE 8: Multidão cerca o rei na praça ===
-	var plaza := Game.loc_pos("plaza")
+	# === Multidão cerca o rei na praça (junto aos corpos dos guardas) ===
 	for i3 in revolt_npcs.size():
 		var n: NPC = revolt_npcs[i3]
 		var angle := float(i3) / float(revolt_npcs.size()) * TAU
@@ -1639,7 +1732,7 @@ func _victory_sequence() -> void:
 	king.say("Não... piedade...", 4.0)
 	await get_tree().create_timer(3.0).timeout
 
-	# === FASE 9: "Execução" não explícita — escurecimento + sons ===
+	# === "Execução" — escurecimento + sons ===
 	shake = 10.0
 	Sfx.play("thud")
 	emit_particle("sparkle_red", plaza)
@@ -1654,20 +1747,6 @@ func _victory_sequence() -> void:
 	for n: NPC in revolt_npcs:
 		n.say("" , 0.1)
 	await get_tree().create_timer(2.5).timeout
-
-	# Guardas caem mortos junto com o Rei
-	var guard_end: NPC = npcs.get("npc_guard")
-	if guard_end and is_instance_valid(guard_end):
-		guard_end.position = plaza + Vector2(-30, 15)
-		guard_end.fall()
-		guard_end.moving = false
-		guard_end.set_physics_process(false)
-	var guard2_end: NPC = npcs.get("npc_guard2")
-	if guard2_end and is_instance_valid(guard2_end):
-		guard2_end.position = plaza + Vector2(35, 20)
-		guard2_end.fall()
-		guard2_end.moving = false
-		guard2_end.set_physics_process(false)
 
 	# Alguns NPCs caem mortos (colateral da revolta)
 	var dead_count := 0

@@ -131,6 +131,14 @@ func setup(npc_id: String, d: Dictionary, w) -> void:
 
 ## Cria cone de visão triangular (~120 px) para NPCs de autoridade (guardas, rei).
 ## O Area2D fica rotacionado no _physics_process para bater com facing_direction.
+func disable_vision_cone() -> void:
+	if vision_cone != null:
+		vision_cone.queue_free()
+		vision_cone = null
+		_vision_cone_polygon = null
+		queue_redraw()
+
+
 func _build_vision_cone() -> void:
 	vision_cone = Area2D.new()
 	vision_cone.name = "VisionCone"
