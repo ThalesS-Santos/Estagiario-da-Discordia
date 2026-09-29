@@ -751,10 +751,6 @@ func restart_day() -> void:
 
 # ------------------------------------------------------------------ input
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_F2 and OS.is_debug_build():
-			_debug_skip_to_conclusion()
-			return
 	if intro_active or phase == Phase.TERMINAL or phase == Phase.CONFRONTATION or phase == Phase.ENDED:
 		return
 	if event is InputEventMouseButton and event.pressed:

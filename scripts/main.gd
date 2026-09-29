@@ -748,12 +748,6 @@ func show_menu() -> void:
 		_flash()
 		show_name_entry())
 	box.add_child(b_start)
-	var b_load := MenuBtn.new("CARREGAR ARQUIVOS", func():
-		if Game.load_game():
-			_flash()
-			start_game(false), Color(0.5, 0.8, 1.0))
-	b_load.disabled = not Game.has_save()
-	box.add_child(b_load)
 	var b_cfg := MenuBtn.new("CONFIGURAÇÕES", func():
 		var sp := SettingsScript.new()
 		sp.position = Vector2(400, 160)
