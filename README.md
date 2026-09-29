@@ -81,7 +81,7 @@ O ciclo de jogo divide-se em fases contínuas controladas pelo motor:
 ### 5. Mecânica de Suspeita e Modo de Perseguição (*Pursuit*)
 - Ficar muito tempo perto de áreas restritas (como o Portão do Castelo sob os olhos do Ancião Osric) eleva a **Barra de Suspeita**.
 - Se a suspeita atingir 100%, os guardas iniciam o modo **PURSUIT**:
-  - A tela ganha uma **vinheta de tensão avermelhada**.
+  - A tela ganha uma **vinheta de tensão avermelhada**!
   - O áudio entra em loop acelerado de alerta.
   - O jogador deve fugir e se esconder até o medidor decair. Três capturas resultam em fracasso imediato da missão.
 
