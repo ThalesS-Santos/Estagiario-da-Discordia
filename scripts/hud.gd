@@ -49,8 +49,6 @@ var mission_clues_vbox: VBoxContainer
 var _mission_clue_labels: Dictionary = {}
 var _mission_panel_tween: Tween
 var _mission_autohide_timer: SceneTreeTimer
-var suspicion_panel: NinePatchRect
-var suspicion_bar: TextureProgressBar
 var opportunity_panel: NinePatchRect
 var opportunity_label: Label
 var opportunity_timer_label: Label
@@ -103,7 +101,7 @@ var chain_panel: NinePatchRect
 var chain_toggle_btn: Button
 var chain_panel_visible := false
 var chain_vbox: VBoxContainer
-var _chain_autohide_timer: SceneTreeTimer
+
 var tut_step := 0
 var _gate_prompt: Label
 var _tex_cache: Dictionary = {}
@@ -163,7 +161,6 @@ func _ready() -> void:
 	_build_pause()
 	_build_loading()
 	_build_mission_panel()
-	_build_suspicion_panel()
 	_build_opportunity_panel()
 	_build_clue_popup()
 	_build_active_event_panel()
@@ -276,31 +273,9 @@ func _build_mission_panel() -> void:
 	ui.add_child(mission_toggle_btn)
 
 
-func _build_suspicion_panel() -> void:
-	suspicion_panel = _9patch(tex_panel, [4, 4, 4, 4], Vector2(186, 34))
-	suspicion_panel.position = Vector2(10, 300)
-	suspicion_panel.visible = false
-	ui.add_child(suspicion_panel)
-	var lbl := _label("OSRIC TE VÊ", 9, Color(1.0, 0.55, 0.25))
-	lbl.position = Vector2(8, 4)
-	suspicion_panel.add_child(lbl)
-	suspicion_bar = TextureProgressBar.new()
-	suspicion_bar.texture_progress = tex_stat_fill
-	suspicion_bar.texture_under = tex_stat_bg
-	suspicion_bar.tint_progress = Color(1.0, 0.35, 0.15)
-	suspicion_bar.min_value = 0
-	suspicion_bar.max_value = 100
-	suspicion_bar.value = 0
-	suspicion_bar.position = Vector2(8, 20)
-	suspicion_bar.custom_minimum_size = Vector2(170, 10)
-	suspicion_bar.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	suspicion_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	suspicion_panel.add_child(suspicion_bar)
-
-
 func _build_opportunity_panel() -> void:
 	opportunity_panel = _9patch(tex_tooltip, [4, 4, 4, 4], Vector2(420, 52))
-	opportunity_panel.position = Vector2((1280 - 420) / 2, 720 - 100)
+	opportunity_panel.position = Vector2((1280 - 420) / 2.0, 720 - 100)
 	opportunity_panel.visible = false
 	opportunity_panel.modulate = Color(1.0, 0.9, 0.3)
 	ui.add_child(opportunity_panel)
@@ -890,14 +865,6 @@ func _resize_mission_panel() -> void:
 	mission_panel.size.y = clampf(h, 52.0, 300.0)
 
 
-func set_suspicion(val: float) -> void:
-	suspicion_bar.value = val
-
-
-func set_suspicion_visible(v: bool) -> void:
-	suspicion_panel.visible = v
-
-
 func show_opportunity(seconds: float) -> void:
 	opportunity_timer_label.text = "%ds" % int(ceilf(seconds))
 	opportunity_panel.visible = true
@@ -928,7 +895,7 @@ func set_revolt_mode() -> void:
 	var W := 700
 	opportunity_panel.custom_minimum_size = Vector2(W, 72)
 	opportunity_panel.size = Vector2(W, 72)
-	opportunity_panel.position = Vector2((1280 - W) / 2, 720 - 90)
+	opportunity_panel.position = Vector2((1280 - W) / 2.0, 720 - 90)
 	opportunity_timer_label.visible = false
 	opportunity_label.text = "⚔  A REVOLTA COMEÇOU — ENTRE NO CASTELO!  ⚔"
 	opportunity_label.add_theme_font_size_override("font_size", 17)
@@ -1115,7 +1082,7 @@ func set_loading(waiting: bool) -> void:
 
 func _build_card() -> void:
 	card = _9patch(tex_panel, [4, 4, 4, 4], Vector2(256, 0))
-	card.position = Vector2(12, 720 - 240)
+	card.position = Vector2(1280 - 12 - 256, 720 - 88 - 240)
 	card.visible = false
 	ui.add_child(card)
 	var margin := MarginContainer.new()
@@ -1718,6 +1685,9 @@ func _tut_render() -> void:
 		["INVESTIGAR NPCs",
 		 "Clique com o botão DIREITO em qualquer NPC para abrir o menu de ações:\n\n  • Observar — revela dicas sobre a personalidade e fraquezas do NPC (grátis)\n  • Escutar — ouve o que ele está falando, pode gerar pistas (grátis)\n  • Confrontar — usa evidências para abalar a lealdade dele (1 PA)\n  • Pedir Ajuda — resultado depende de quem é o NPC e do nível de Instabilidade (1 PA)\n\nPasse o mouse sobre um NPC para ver o card com os atributos dele.",
 		 "Clique dir.  menu de ações\nObservar  dica grátis\nEscutar  dica grátis\nPedir Ajuda  varia por NPC\nTAB  todos os status"],
+		["GUARDAS E CAPTURA",
+		 "Bram e Renato vigiam a vila. O círculo amarelo em volta deles é a área de visão.\n\nSe um guarda te vir com um item real, arma ou veneno, a barra de suspeita dele enche rápido. Cheia, ele te persegue.\n\nSe ele te alcançar, você escolhe como reagir. Cada NPC reage conforme sua personalidade: crianças acreditam em mentiras, gananciosos aceitam suborno... Bram é incorruptível: tentar enganá-lo custa 1 PA.\n\nAo FUGIR, corra! O guarda cansa depois de um tempo. Se ele te alcançar na fuga, você perde 1 PA.\n\nSE UM GUARDA TE CAPTURAR 2 VEZES, A MISSÃO ACABA EM DERROTA.",
+		 "Círculo  visão do guarda\nAgachar (Shift)  menos suspeita\nFugir  guarda cansa\nPego na fuga  -1 PA\n2 capturas  DERROTA"],
 		["OBJETIVO",
 		 "A barra de INSTABILIDADE SOCIAL no canto superior direito precisa chegar a 100%.\nQuando isso acontecer, o próprio povo derruba o Rei Aldemar — vitória!\n\nVocê tem 3 dias. Se não chegar a 100% ao final do Dia 3: derrota.\n\nDica: combine objetos simbólicos (armas reais, itens sagrados) com boatos bem elaborados para maximizar o impacto. Fale com os aldeões mais instáveis primeiro.",
 		 "3 dias no total\n3 PA por dia\nInstabilidade = 100%  vitória\nSem violência!\nBoatos + objetos = mais impacto"],
@@ -1957,7 +1927,7 @@ func set_hover(o, n) -> void:
 				memory_box.add_child(ml)
 		var content: Control = card.get_child(1)
 		card.size = Vector2(256, maxf(content.get_combined_minimum_size().y, 60.0))
-		card.position = Vector2(12.0 if not _event_log_expanded else 322.0, 720 - 64 - card.size.y)
+		card.position = Vector2(1280 - 12 - card.size.x, 720 - 88 - card.size.y)
 	else:
 		card.visible = false
 	if o:

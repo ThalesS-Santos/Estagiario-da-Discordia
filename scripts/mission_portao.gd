@@ -35,7 +35,6 @@ var player_crossed := false
 
 # timers de observação para pistas passivas
 var _bram_watch_t  := 0.0
-var _osric_watch_t := 0.0
 
 # referências (atribuídas em setup)
 var _world  = null
@@ -58,10 +57,6 @@ const CLUE_DATA := {
 	"bram_padrao": {
 		"label": "Ponto Fraco do Guarda",
 		"desc": "Bram abandona o posto quando há tumulto sério na praça ou na ferraria. Ele não consegue ignorar barulho.",
-	},
-	"osric_vigia": {
-		"label": "O Olho do Ancião",
-		"desc": "Ancião Osric vigia o portão de longe. Se te ver cruzando sem o guarda, vai denunciá-lo.",
 	},
 	"moeda_real": {
 		"label": "Moeda com Brasão",
@@ -113,7 +108,6 @@ const CLUE_LIST := [
 	{"id": "joao_rancor",     "label": "Rancor do Padeiro"},
 	{"id": "carta_convocacao","label": "Convocação ignorada"},
 	{"id": "moeda_real",      "label": "Moeda do Rei"},
-	{"id": "osric_vigia",     "label": "Olho do Ancião"},
 ]
 
 # Mensagens de feedback causal por ação do jogador (heurísticas simples)
@@ -122,7 +116,6 @@ const _FEEDBACK_BY_CLUE := {
 	"joao_rancor": "João da Padaria pode causar um escândalo com Bram. Tente provocar uma briga.",
 	"carta_convocacao": "Pressão pública pode forçar Bram a deixar o posto. Espalhe a convocação.",
 	"moeda_real": "Uma moeda suspeita no lugar errado pode iniciar uma investigação.",
-	"osric_vigia": "Atenção: Osric vigia o portão. Passe quando ele não puder te ver.",
 }
 
 
@@ -212,8 +205,6 @@ func _close_gate(timed_out: bool) -> void:
 
 func _tick_osric_suspicion(delta: float) -> void:
 	if revolt_mode:
-		if _hud and _hud.has_method("set_suspicion_visible"):
-			_hud.set_suspicion_visible(false)
 		return
 	if not is_instance_valid(_osric) or not is_instance_valid(_player):
 		return
@@ -225,26 +216,13 @@ func _tick_osric_suspicion(delta: float) -> void:
 	# Suspeita sobe só quando Osric vê jogador perto do portão enquanto ele está aberto
 	if osric_sees and gate_is_open and player_dist_gate < GATE_NEAR_DIST:
 		suspicion = minf(suspicion + SUSPICION_RATE * delta, 100.0)
-		if _hud and _hud.has_method("set_suspicion"):
-			_hud.set_suspicion(suspicion)
-			_hud.set_suspicion_visible(true)
 		suspicion_changed.emit(suspicion)
 		if suspicion >= 100.0 and not mission_ended:
 			_osric_catches_player()
 	elif osric_sees:
-		# Osric vê jogador mas não está perto do portão — pista passiva
-		if _hud and _hud.has_method("set_suspicion_visible"):
-			_hud.set_suspicion_visible(true)
 		suspicion = maxf(suspicion - SUSPICION_DECAY * 0.3 * delta, 0.0)
-		if _hud and _hud.has_method("set_suspicion"):
-			_hud.set_suspicion(suspicion)
 	else:
-		# Osric não vê jogador — suspeita decai
 		suspicion = maxf(suspicion - SUSPICION_DECAY * delta, 0.0)
-		if suspicion <= 0.01 and _hud and _hud.has_method("set_suspicion_visible"):
-			_hud.set_suspicion_visible(false)
-		elif _hud and _hud.has_method("set_suspicion"):
-			_hud.set_suspicion(suspicion)
 
 
 func _tick_passive_clues(delta: float) -> void:
@@ -260,16 +238,6 @@ func _tick_passive_clues(delta: float) -> void:
 				_discover_clue("bram_padrao")
 		else:
 			_bram_watch_t = 0.0
-
-	# Pista: ficar perto do Ancião Osric por 4 segundos
-	if is_instance_valid(_osric):
-		var d_osric: float = _player.global_position.distance_to(_osric.global_position)
-		if d_osric < 80.0:
-			_osric_watch_t += delta
-			if _osric_watch_t >= 4.0:
-				_discover_clue("osric_vigia")
-		else:
-			_osric_watch_t = 0.0
 
 
 func _tick_crossing() -> void:
@@ -314,8 +282,6 @@ func try_open_gate() -> bool:
 func _osric_catches_player() -> void:
 	suspicion   = 0.0
 	catch_count += 1
-	if _hud and _hud.has_method("set_suspicion_visible"):
-		_hud.set_suspicion_visible(false)
 	if _hud and _hud.has_method("flash_danger"):
 		_hud.flash_danger()
 
@@ -346,8 +312,6 @@ func notify_npc_observed(npc_id: String) -> void:
 	match npc_id:
 		"npc_guard":
 			_discover_clue("bram_padrao")
-		"villager_elder":
-			_discover_clue("osric_vigia")
 		"npc_baker":
 			_discover_clue("joao_rancor")
 
@@ -360,8 +324,6 @@ func notify_npc_listened(npc_id: String) -> void:
 			_discover_clue("joao_rancor")
 		"npc_merchant", "villager_lady":
 			_discover_clue("moeda_real")
-		"villager_elder":
-			_discover_clue("osric_vigia")
 		"npc_priestess", "villager_farmer":
 			_discover_clue("carta_convocacao")
 

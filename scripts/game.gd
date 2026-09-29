@@ -406,7 +406,7 @@ var active_events: Array = []
 var _active_event_counter := 0
 var persistence_enabled := true
 var ui_theme: Theme
-var settings := {"master": 1.0, "music": 0.8, "sfx": 0.8, "sim_speed": 1.0, "resolution": 0, "subtitles": true}
+var settings := {"master": 1.0, "music": 0.8, "sfx": 0.8, "sim_speed": 1.0, "display_mode": 2, "subtitles": true}
 
 ## Reputação por grupo: -100 (hostil) a +100 (aliado). Afeta reações, diálogos e acesso.
 var reputation: Dictionary = {}
@@ -482,7 +482,22 @@ func reputation_modifier(npc_id: String) -> Dictionary:
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	ui_theme = _make_theme()
+	get_tree().node_added.connect(_smooth_text)
 	reset()
+
+
+## Com filtro nearest global, texto pequeno em escala fracionária (tela cheia) perde linhas de pixel.
+func _smooth_text(node: Node) -> void:
+	if node is Label or node is RichTextLabel:
+		(node as CanvasItem).texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	elif node is Button:
+		_smooth_button.call_deferred(node)
+
+
+## Botão com moldura pixel-art (StyleBoxTexture) continua nearest para não borrar a moldura.
+func _smooth_button(b: Button) -> void:
+	if is_instance_valid(b) and not (b.get_theme_stylebox("normal") is StyleBoxTexture):
+		b.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 
 
 func reset() -> void:
@@ -784,21 +799,97 @@ const CONFRONTATION_CHOICES := {
 }
 
 
-func get_available_confrontation_choices(_npc_id: String, has_valuable: bool) -> Array:
+## Personalidade de cada NPC no confronto: "win" sempre funciona, "fail" sempre falha
+## (com a fala em "lines"); o resto é sorteado. "punish": falhar custa 1 PA (empurrão).
+const CONFRONT_PROFILES := {
+	"npc_guard": {
+		"fail": ["lie", "threaten", "bribe", "accuse"], "punish": true,
+		"lines": {
+			"lie": "Bram não engole mentira. Ele te derruba com um empurrão!",
+			"threaten": "Bram não tem medo de ninguém. Ele te joga no chão!",
+			"bribe": "\"Eu sirvo ao reino, não ao ouro!\" Bram te empurra longe!",
+			"accuse": "\"Não jogue a culpa nos outros!\" Bram te dá um tranco!",
+		}},
+	"npc_guard2": {
+		"win": ["bribe"], "fail": ["lie", "threaten"],
+		"lines": {
+			"bribe": "Renato embolsa as moedas e olha para o outro lado. \"Não vi nada.\"",
+			"lie": "Renato ri: \"Conta outra, estagiário.\"",
+			"threaten": "\"Ameaçando um guarda? Engraçadinho.\"",
+		}},
+	"npc_king": {
+		"fail": ["lie", "threaten", "bribe", "accuse"],
+		"lines": {
+			"lie": "O Rei nem se dá ao trabalho de ouvir.",
+			"threaten": "\"Ameaçar o Rei?!\" Aldemar fica rubro de raiva.",
+			"bribe": "\"Subornar quem é dono de todo o ouro?\" O Rei gargalha.",
+			"accuse": "\"Todos são culpados até eu dizer o contrário.\"",
+		}},
+	"npc_baker": {
+		"win": ["accuse"],
+		"lines": {"accuse": "João já tinha birra com o Bram e sai resmungando atrás dele."}},
+	"npc_smith": {
+		"win": ["admit"], "fail": ["threaten"],
+		"lines": {
+			"admit": "Marten ri alto: \"Contra a coroa? Então somos dois.\"",
+			"threaten": "Marten estala os dedos gigantes. Péssima ideia.",
+		}},
+	"npc_priestess": {
+		"win": ["admit"], "fail": ["lie", "threaten"],
+		"lines": {
+			"admit": "Mira sorri com calma: \"A confissão liberta. Vá em paz.\"",
+			"lie": "Mira enxerga a mentira nos seus olhos.",
+			"threaten": "\"A fé não se curva a ameaças.\"",
+		}},
+	"npc_merchant": {
+		"win": ["bribe"],
+		"lines": {"bribe": "Valdo morde a moeda, sorri e some no meio da multidão."}},
+	"npc_orphan": {
+		"win": ["lie"],
+		"lines": {"lie": "Lila acredita em tudo e sai correndo atrás de uma borboleta."}},
+	"villager_boy": {
+		"win": ["lie"],
+		"lines": {"lie": "Pip arregala os olhos: \"Sério?! Que legal!\" e esquece tudo."}},
+	"villager_farmer": {
+		"win": ["lie"],
+		"lines": {"lie": "Tobias coça a cabeça: \"Ah, tá bom então...\""}},
+	"villager_woman": {
+		"win": ["threaten"],
+		"lines": {"threaten": "Helga empalidece e sai apressada sem olhar para trás."}},
+	"villager_elder": {
+		"win": ["admit"], "fail": ["lie", "threaten", "bribe"],
+		"lines": {
+			"admit": "Osric assente devagar: \"A verdade tem valor. Guardarei seu segredo.\"",
+			"lie": "\"Já vivi demais para cair nessa, rapaz.\"",
+			"threaten": "O ancião nem pisca. \"Tente outra coisa.\"",
+			"bribe": "\"Meu silêncio não está à venda.\"",
+		}},
+	"villager_lady": {
+		"win": ["accuse"],
+		"lines": {"accuse": "Isolde adora um escândalo e já vai espalhar a acusação."}},
+}
+
+
+func get_available_confrontation_choices(_npc_id: String, _has_valuable: bool) -> Array:
 	var result: Array = []
 	for cid in CONFRONTATION_CHOICES:
 		var choice: Dictionary = CONFRONTATION_CHOICES[cid]
-		var reqs: Dictionary = choice.requires
-		var available := true
-		if reqs.has("min_instability") and instability < float(reqs.min_instability):
-			available = false
-		if reqs.get("has_item_tag") and not has_valuable:
-			available = false
-		if reqs.get("has_evidence") and get_active_evidence().is_empty():
-			available = false
 		result.append({"id": cid, "label": choice.label, "description": choice.description,
-			"icon": choice.icon, "available": available})
+			"icon": choice.icon, "available": true})
 	return result
+
+
+func _confront_forced(npc_id: String, choice_id: String) -> int:
+	var prof: Dictionary = CONFRONT_PROFILES.get(npc_id, {})
+	if choice_id in prof.get("win", []):
+		return 1
+	if choice_id in prof.get("fail", []):
+		return 0
+	return -1
+
+
+func _confront_roll(chance: float, forced: int) -> bool:
+	return randf() < chance if forced < 0 else forced == 1
 
 
 func evaluate_confrontation(choice_id: String, npc_id: String) -> Dictionary:
@@ -809,11 +900,12 @@ func evaluate_confrontation(choice_id: String, npc_id: String) -> Dictionary:
 	var rep := npc_reputation(npc_id)
 	var rep_bonus := rep * 0.003
 	var result := {"success": false, "text": "", "instability_delta": 0.0,
-		"npc_effects": {}, "flee": false, "suspicion_delta": 0.0, "reputation_delta": 0.0}
+		"npc_effects": {}, "flee": false, "suspicion_delta": 0.0, "reputation_delta": 0.0, "ap_damage": 0}
+	var forced := _confront_forced(npc_id, choice_id)
 	match choice_id:
 		"lie":
 			var chance := 0.8 - susp / 200.0 - anger / 200.0 + rep_bonus
-			result.success = randf() < chance
+			result.success = _confront_roll(chance, forced)
 			if result.success:
 				result.text = "O NPC acreditou na sua história."
 				result.suspicion_delta = -20.0
@@ -826,7 +918,7 @@ func evaluate_confrontation(choice_id: String, npc_id: String) -> Dictionary:
 				result.reputation_delta = -8.0
 		"threaten":
 			var chance := clampf(instability / 100.0 * 0.6 + 0.1 - loyalty / 200.0 + rep_bonus, 0.1, 0.8)
-			result.success = randf() < chance
+			result.success = _confront_roll(chance, forced)
 			if result.success:
 				result.text = "O NPC recuou, intimidado."
 				result.npc_effects = {"fear": 20.0, "loyalty": -15.0}
@@ -840,7 +932,7 @@ func evaluate_confrontation(choice_id: String, npc_id: String) -> Dictionary:
 				result.reputation_delta = -10.0
 		"bribe":
 			var chance := 0.6 - loyalty / 250.0 + anger / 500.0 + rep_bonus
-			result.success = randf() < clampf(chance, 0.15, 0.85)
+			result.success = _confront_roll(clampf(chance, 0.15, 0.85), forced)
 			if result.success:
 				result.text = "O NPC aceitou o suborno e fez vista grossa."
 				result.npc_effects = {"loyalty": -20.0, "anger": -10.0}
@@ -857,7 +949,7 @@ func evaluate_confrontation(choice_id: String, npc_id: String) -> Dictionary:
 			for ev in evidence:
 				strength = maxf(strength, float(ev.get("strength", 0)))
 			var chance := clampf(strength / 100.0 + 0.1 + rep_bonus, 0.2, 0.9)
-			result.success = randf() < chance
+			result.success = _confront_roll(chance, forced)
 			if result.success:
 				result.text = "O NPC ficou confuso e foi investigar outra pessoa."
 				result.npc_effects = {"anger": -10.0}
@@ -880,6 +972,16 @@ func evaluate_confrontation(choice_id: String, npc_id: String) -> Dictionary:
 			result.suspicion_delta = -10.0
 			result.npc_effects = {"anger": -5.0, "loyalty": -10.0}
 			result.instability_delta = -5.0
+			if forced == 1:
+				# confissão para quem simpatiza: esquece o caso sem custo
+				result.suspicion_delta = -40.0
+				result.instability_delta = 0.0
+	var prof: Dictionary = CONFRONT_PROFILES.get(npc_id, {})
+	if forced >= 0 and prof.get("lines", {}).has(choice_id):
+		result.text = str(prof.lines[choice_id])
+	if not result.success and prof.get("punish", false):
+		result.ap_damage = 1
+		result.text += " (-1 PA)"
 	return result
 
 
@@ -1201,15 +1303,24 @@ func apply_settings() -> void:
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(float(settings.master), 0.001)))
 	if is_instance_valid(get_node_or_null("/root/Music")):
 		get_node("/root/Music").set_volume(float(settings.music))
-	match int(settings.resolution):
+	match int(settings.display_mode):
 		0:
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-			DisplayServer.window_set_size(Vector2i(1280, 720))
+			_set_windowed(Vector2i(1280, 720))
 		1:
-			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-			DisplayServer.window_set_size(Vector2i(1920, 1080))
-		2:
+			_set_windowed(Vector2i(1920, 1080))
+		_:
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
 			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+func _set_windowed(win_size: Vector2i) -> void:
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+	var screen := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	win_size = win_size.min(screen.size)
+	DisplayServer.window_set_size(win_size)
+	@warning_ignore("integer_division")
+	DisplayServer.window_set_position(screen.position + (screen.size - win_size) / 2)
 
 
 # ---------- tema de UI (terminal retrô) ----------

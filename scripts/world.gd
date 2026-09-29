@@ -72,7 +72,7 @@ var _active_event_queue: Array = []
 var _last_action_effect := true  # setado por _apply_action_specific, lido por _did_action_succeed
 var _tension_t := 0.0
 var _phase_before_confrontation: int = Phase.ACTION
-var exposure_count := 0       # quantas vezes flagrado com item suspeito (2 = game over)
+var exposure_count := 0       # capturas por guarda no jogo inteiro (2 = derrota)
 var _osric_alerted := false   # Osric já alertou Bram neste ciclo (evita spam)
 var _alert_mode := false      # Bram em alerta extra após Osric reportar
 var _alert_mode_t := 0.0
@@ -620,7 +620,6 @@ func _start_day() -> void:
 	follow = null
 	_shadowing_npc = null
 	actions_today.clear()
-	exposure_count = 0
 	_osric_alerted = false
 	_alert_mode = false
 	_alert_mode_t = 0.0
@@ -2575,12 +2574,19 @@ func _update_suspicion(delta: float) -> void:
 		npc._suspicion_decay_paused = true
 
 		var base_rate := 0.0
+		var is_guard := npc.id == "npc_guard" or npc.id == "npc_guard2"
+		var guard_hit := false
 		for tag in held_tags:
 			if _SUSPICIOUS_TAGS.has(tag):
+				if is_guard:
+					guard_hit = true
 				match tag:
 					"veneno": base_rate += 8.0
 					"arma":   base_rate += 5.0
 					"real":   base_rate += 6.0
+		# Guarda que vê item real/arma/veneno reage na hora: barra enche em ~2–3 s.
+		if guard_hit:
+			base_rate = 30.0
 		# evidências no local onde o NPC está aumentam alerta passivo
 		var npc_loc := Game.nearest_location(npc.position)
 		var ev_str := Game.evidence_strength_at(npc_loc)
@@ -2593,10 +2599,13 @@ func _update_suspicion(delta: float) -> void:
 			var rep_mod: Dictionary = Game.reputation_modifier(npc.id)
 			var instab_mult := 1.0 + clampf((Game.instability - 20.0) / 80.0, 0.0, 1.0)
 			var alert_mult := 1.5 if (_alert_mode and npc.id == "npc_guard") else 1.0
-			npc.add_suspicion(base_rate * exposure * susp_rate * float(rep_mod.suspicion_mult) * delta * instab_mult * alert_mult)
+			if guard_hit:
+				npc.add_suspicion(base_rate * exposure * delta * alert_mult)
+			else:
+				npc.add_suspicion(base_rate * exposure * susp_rate * float(rep_mod.suspicion_mult) * delta * instab_mult * alert_mult)
 
 		# confronto: NPC aborda o jogador (evita repetição no mesmo ciclo)
-		if npc.suspicion_state == NPC.SuspicionState.CONFRONTING and not npc.moving and not npc.pursuing:
+		if npc.suspicion_state == NPC.SuspicionState.CONFRONTING and not npc.pursuing and (is_guard or not npc.moving):
 			_on_npc_confronts(npc)
 	_sync_runtime_suspicion()
 
@@ -2639,28 +2648,12 @@ func _on_vision_cone_caught(npc: NPC, _target: Node2D) -> void:
 		return
 	if held != null and _is_item_freely_takeable(held):
 		return
-	exposure_count += 1
+	# Dentro do círculo de visão a suspeita salta; a captura (e a contagem 2/2) vem da perseguição.
+	if npc.suspicion < 60.0:
+		npc.add_suspicion(60.0 - npc.suspicion)
 	hud.flash_danger()
 	Sfx.play("shout")
-	if exposure_count >= 2:
-		_trigger_caught_game_over(npc)
-		return
-	npc.start_pursuit(player, 15.0)
-	phase = Phase.PURSUIT
-	hud.set_pursuit_mode(true)
-	Game.spend_ap(1)
-	hud.toast("⚠ FLAGRADO! Você foi visto! (%d/2 — na próxima a linha temporal é apagada)" % exposure_count, 5.0)
-	hud.add_event_log("Flagrante %d/2: %s viu o Estagiário com item suspeito." % [exposure_count, str(npc.def.get("name", ""))])
-	Game.event_flags["player_caught"] = true
-	Game.add_instability(-10.0)
-	if held != null:
-		var obj := held
-		var return_pos := held_from if held_from != Vector2.ZERO else \
-			player.global_position + Vector2(randf_range(-20, 20), 10)
-		held = null
-		obj.held = false
-		obj.global_position = return_pos
-		player.forget_held()
+	hud.toast("⚠ %s te viu com algo suspeito!" % str(npc.def.get("name", "")), 3.0)
 
 
 func _trigger_caught_game_over(npc: NPC) -> void:
@@ -2755,7 +2748,22 @@ func _is_item_freely_takeable(obj: WorldObject) -> bool:
 	return false
 
 
+const MAX_GUARD_CAPTURES := 2
+
 func _on_npc_catches_player(npc: NPC) -> void:
+	if phase == Phase.CONFRONTATION or phase == Phase.ENDED:
+		return
+	if npc.flee_chase:
+		_caught_while_fleeing(npc)
+		return
+	if npc.id == "npc_guard" or npc.id == "npc_guard2":
+		exposure_count += 1
+		hud.add_event_log("Capturado %d/%d por %s." % [exposure_count, MAX_GUARD_CAPTURES, str(npc.def.get("name", ""))])
+		if exposure_count >= MAX_GUARD_CAPTURES:
+			npc.stop_pursuit("caught")
+			_trigger_caught_game_over(npc)
+			return
+		hud.toast("⚠ Capturado %d/%d — mais uma captura e a missão acaba!" % [exposure_count, MAX_GUARD_CAPTURES], 4.0)
 	_sync_runtime_suspicion()
 	_phase_before_confrontation = phase
 	hud.set_pursuit_mode(false)
@@ -2807,10 +2815,18 @@ func _apply_confrontation(npc_id: String, choice_id: String, result: Dictionary)
 		Game.create_evidence("witness", loc,
 			"%s confrontou o Estagiário." % str(Game.NPC_DEFS.get(npc_id, Game.VILLAGER_DEFS.get(npc_id, {})).get("name", npc_id)),
 			30.0, "", Game.player_name, npc_id)
+	if int(result.get("ap_damage", 0)) > 0:
+		_player_hit(npc, int(result.ap_damage))
 	if result.get("flee", false):
 		player.set_emotion("PANIC")
 		if npc:
-			npc.start_pursuit(player, 8.0)
+			# vantagem de 1 s e guarda um pouco mais lento que o jogador; depois de ~7 s ele cansa
+			npc.pursue_speed_mult = 140.0 / (npc.speed * 1.6)
+			npc.start_pursuit(player, FLEE_CHASE_TIME)
+			npc.flee_chase = true
+			npc.pursue_delay = 1.0
+			_phase_before_confrontation = Phase.PURSUIT
+			hud.set_pursuit_mode(true)
 	else:
 		if npc:
 			npc.suspicion = clampf(npc.suspicion, 0.0, 60.0)
@@ -2824,6 +2840,42 @@ func _apply_confrontation(npc_id: String, choice_id: String, result: Dictionary)
 	phase = _phase_before_confrontation if _phase_before_confrontation != Phase.CONFRONTATION else Phase.ACTION
 	player.input_enabled = phase == Phase.ACTION or phase == Phase.ACTIVE_EVENT or phase == Phase.PURSUIT
 	hud.hide_confrontation()
+
+
+const FLEE_CHASE_TIME := 7.0
+
+## Guarda alcançou o jogador durante a fuga: dano (-1 PA) e ele volta ao posto.
+func _caught_while_fleeing(npc: NPC) -> void:
+	npc.stop_pursuit("caught")
+	npc.say("Achou que ia escapar? Toma!", 3.0)
+	npc.show_emote("!", 2.0)
+	_player_hit(npc, 1)
+	npc.suspicion = 30.0
+	npc._update_suspicion_state()
+	get_tree().create_timer(1.2).timeout.connect(func():
+		if is_instance_valid(npc) and not npc.pursuing:
+			npc.walk_to(npc.home))
+	for other: NPC in npcs.values() + villagers:
+		if other.pursuing:
+			return
+	if phase == Phase.PURSUIT:
+		phase = Phase.ACTION
+		hud.set_pursuit_mode(false)
+
+
+## "Dano" no Estagiário: empurrão, tremida e perda de PA.
+func _player_hit(npc: NPC, ap_loss: int) -> void:
+	Game.spend_ap(mini(ap_loss, Game.ap))
+	shake = 7.0
+	Sfx.play("thud")
+	hud.flash_danger()
+	player.set_emotion("PANIC")
+	if npc:
+		player.move_and_collide(npc.global_position.direction_to(player.global_position) * 18.0)
+		emit_particle("stars_dizzy", player.global_position + Vector2(0, -30))
+	var who := str(npc.def.get("name", "O guarda")) if npc else "O guarda"
+	hud.toast("%s te acertou! -%d PA" % [who, ap_loss], 3.5)
+	hud.add_event_log("%s te acertou: -%d PA." % [who, ap_loss])
 
 
 func _on_npc_calls_backup(caller: NPC) -> void:

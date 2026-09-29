@@ -58,6 +58,9 @@ var suspicion_state: int = SuspicionState.CALM
 var _suspicion_decay_paused := false
 
 var pursuing := false
+var flee_chase := false          # perseguição iniciada pela opção "Fugir" do confronto
+var pursue_delay := 0.0          # segundos de vantagem antes do NPC começar a correr
+var tired_t := 0.0               # ofegante depois de desistir da perseguição
 var pursue_target: Node2D = null
 var pursue_timer := 0.0
 var pursue_duration := 12.0
@@ -75,7 +78,6 @@ var _emotes: Texture2D
 
 # Módulo 2: cone de visão (apenas NPCs de autoridade: guardas e rei)
 var vision_cone: Area2D = null
-var _vision_cone_polygon: CollisionPolygon2D = null
 var _vision_detect_t := 0.0        # timer de polling (0.12s)
 var _vision_detect_cooldown := 0.0 # cooldown após detectar (3s)
 
@@ -84,8 +86,26 @@ var _push_target: NPC = null      # NPC-alvo para colisão raivosa
 var _push_cooldown := 0.0
 
 
+## Bram: preso a uma ronda pequena em volta do portão até a revolta começar.
+const POST_RADIUS := Vector2(56, 26)
+var post_locked := false
+var post_center := Vector2.ZERO
+var _post_angle := 0.0
+
+
 func _is_authority() -> bool:
 	return id in ["npc_guard", "npc_guard2", "npc_king"]
+
+
+func _on_post() -> bool:
+	return post_locked and not (world != null and world.get("_revolt_active") == true)
+
+
+func _clamp_to_post(p: Vector2) -> Vector2:
+	var d := (p - post_center) / POST_RADIUS
+	if d.length() <= 1.0:
+		return p
+	return post_center + d.normalized() * POST_RADIUS
 
 
 func setup(npc_id: String, d: Dictionary, w) -> void:
@@ -103,6 +123,10 @@ func setup(npc_id: String, d: Dictionary, w) -> void:
 		home = Game.loc_pos(d.home)
 	if id == "npc_king":
 		home = Game.loc_pos("throne") + Vector2(0, 6)
+	if id == "npc_guard":
+		post_locked = true
+		post_center = Game.loc_pos("castle_gate") + Vector2(0, 20)
+		home = post_center
 	position = home
 	target = home
 	t = randf() * 10.0
@@ -135,8 +159,11 @@ func disable_vision_cone() -> void:
 	if vision_cone != null:
 		vision_cone.queue_free()
 		vision_cone = null
-		_vision_cone_polygon = null
 		queue_redraw()
+
+
+func _vision_radius() -> float:
+	return 40.0 if id == "villager_elder" else 58.0
 
 
 func _build_vision_cone() -> void:
@@ -145,18 +172,11 @@ func _build_vision_cone() -> void:
 	vision_cone.collision_layer = 0
 	vision_cone.collision_mask = 2  # camada do jogador
 	vision_cone.monitorable = false
-	var poly := CollisionPolygon2D.new()
-	# Triângulo: ponta na origem, abrindo ~50° para a direita (+X = frente padrão)
-	# Osric tem cone menor (alcance de informante, não de guarda)
-	var depth := 45.0 if id == "villager_elder" else 70.0
-	var spread := 20.0 if id == "villager_elder" else 30.0
-	poly.polygon = PackedVector2Array([
-		Vector2(0, 0),
-		Vector2(depth, -spread),
-		Vector2(depth, spread),
-	])
-	vision_cone.add_child(poly)
-	_vision_cone_polygon = poly
+	var shape := CollisionShape2D.new()
+	var circle := CircleShape2D.new()
+	circle.radius = _vision_radius()
+	shape.shape = circle
+	vision_cone.add_child(shape)
 	vision_cone.body_entered.connect(_on_vision_cone_body_entered)
 	add_child(vision_cone)
 
@@ -209,6 +229,8 @@ class NpcUI extends Node2D:
 func walk_to(p: Vector2, run := false) -> void:
 	if fallen:
 		return
+	if _on_post():
+		p = _clamp_to_post(p)
 	target = p
 	navigation_agent.target_position = p
 	stuck_time = 0.0
@@ -346,11 +368,17 @@ func stop_pursuit(reason := "") -> void:
 		return
 	pursuing = false
 	pursue_target = null
+	pursue_delay = 0.0
 	running = false
 	moving = false
 	current_state = "IDLE"
 	suspicion = clampf(suspicion, 0.0, 70.0)
 	_suspicion_decay_paused = false
+	var was_flee := flee_chase
+	flee_chase = false
+	if reason == "timeout" or (was_flee and reason == "lost"):
+		_get_tired()
+		return
 	if reason == "lost":
 		show_emote("?", 2.5)
 		say("Para onde ele foi?!", 3.0)
@@ -361,6 +389,30 @@ func stop_pursuit(reason := "") -> void:
 		show_emote("!", 2.0)
 
 
+const TIRED_TIME := 3.0
+
+func _get_tired() -> void:
+	tired_t = TIRED_TIME
+	suspicion = minf(suspicion, 30.0)
+	_update_suspicion_state()
+	show_emote("...", TIRED_TIME)
+	var lines := ["Ufa... ufa... não aguento mais...", "Esse estagiário corre demais...", "Preciso... recuperar o fôlego..."]
+	say(lines[randi() % lines.size()], TIRED_TIME)
+
+
+func _tick_tired(delta: float) -> void:
+	tired_t -= delta
+	moving = false
+	dust_t -= delta
+	if dust_t <= 0.0 and world:
+		dust_t = 0.45
+		world.emit_particle("tears", global_position + Vector2(0, -40))
+	if tired_t <= 0.0:
+		tired_t = 0.0
+		body.scale = Vector2(2, 2)
+		walk_to(home)
+
+
 func _tick_pursuit(delta: float) -> void:
 	if not pursuing or not is_instance_valid(pursue_target):
 		stop_pursuit("lost")
@@ -368,6 +420,9 @@ func _tick_pursuit(delta: float) -> void:
 	pursue_timer += delta
 	if pursue_timer >= pursue_duration:
 		stop_pursuit("timeout")
+		return
+	if pursue_timer < pursue_delay:
+		moving = false
 		return
 	var dist := global_position.distance_to(pursue_target.global_position)
 	# perdeu de vista
@@ -428,15 +483,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if NavigationServer2D.map_get_iteration_id(navigation_agent.get_navigation_map()) == 0:
 		return
-	# Módulo 2: rodar o cone de visão para bater com a direção que o NPC está olhando.
 	if vision_cone != null:
-		var cone_angle: float
-		match dir:
-			0: cone_angle = PI / 2.0           # frente (para baixo em top-down)
-			1: cone_angle = -PI / 2.0          # costas (para cima)
-			2: cone_angle = 0.0 if facing > 0 else PI  # lateral
-			_: cone_angle = PI / 2.0
-		vision_cone.rotation = cone_angle
 		# Polling de detecção a cada 0.35s (cobre o caso de pegar item já dentro do cone)
 		_vision_detect_cooldown = maxf(_vision_detect_cooldown - delta, 0.0)
 		if _vision_detect_cooldown <= 0.0:
@@ -450,6 +497,9 @@ func _physics_process(delta: float) -> void:
 	if current_state == "ANGRY" and _push_target == null and world != null and \
 			Game.instability > 50.0 and not fallen:
 		_check_npc_push_range()
+	if tired_t > 0.0:
+		_tick_tired(delta)
+		return
 	if pursuing:
 		_tick_pursuit(delta)
 	if moving and not fallen:
@@ -472,6 +522,12 @@ func _physics_process(delta: float) -> void:
 			if dust_t <= 0.0:
 				dust_t = 0.18
 				world.emit_particle("dust_small", global_position + Vector2(0, 2))
+	elif _on_post() and not fallen and not pursuing and suspicion_state == SuspicionState.CALM:
+		wander_t -= delta
+		if wander_t <= 0.0:
+			wander_t = randf_range(1.0, 2.5)
+			_post_angle = fmod(_post_angle + randf_range(0.6, 1.2), TAU)
+			walk_to(post_center + Vector2.from_angle(_post_angle) * POST_RADIUS * 0.85)
 	elif ambient and not fallen and not pursuing and id != "npc_king":
 		wander_t -= delta
 		if wander_t <= 0.0:
@@ -484,20 +540,22 @@ func _physics_process(delta: float) -> void:
 				if not _in_water(dest):
 					walk_to(dest)
 	position = position.clamp(Vector2(10, 10), Game.MAP_SIZE - Vector2(10, 10))
+	if _on_post():
+		position = _clamp_to_post(position)
 
 
 ## Polling a cada 0.35s — detecta itens pegos enquanto já dentro do cone.
 func _poll_vision_detection() -> void:
 	if fallen or pursuing or (not _is_authority() and id != "villager_elder"):
 		return
-	for body in vision_cone.get_overlapping_bodies():
-		if not body.is_in_group("player"):
+	for bd in vision_cone.get_overlapping_bodies():
+		if not bd.is_in_group("player"):
 			continue
-		var holding_sus: bool = body.has_method("is_holding_suspicious_item") and body.is_holding_suspicious_item()
-		var in_stealth: bool = body.has_method("is_in_stealth_state") and body.is_in_stealth_state()
+		var holding_sus: bool = bd.has_method("is_holding_suspicious_item") and bd.is_holding_suspicious_item()
+		var in_stealth: bool = bd.has_method("is_in_stealth_state") and bd.is_in_stealth_state()
 		if holding_sus and not in_stealth:
 			_vision_detect_cooldown = 3.0
-			_trigger_vision_detection(body)
+			_trigger_vision_detection(bd)
 			break
 
 
@@ -624,6 +682,15 @@ func _update_sprite(vel: Vector2) -> void:
 	else:
 		body.rotation = 0.0
 		body.position = Vector2.ZERO
+	if tired_t > 0.0 and not fallen:
+		# ofegante: curvado para frente, arfando rápido
+		var pant := absf(sin(t * 9.0))
+		body.frame = 0
+		body.flip_h = false
+		body.scale = Vector2(2.0 + pant * 0.12, 2.0 - pant * 0.16)
+		body.position = Vector2(0, 2.0 + pant * 1.5)
+	elif body.scale != Vector2(2, 2):
+		body.scale = Vector2(2, 2)
 	var m := Color.WHITE
 	if mood_anger > 0.05:
 		m = m.lerp(Color(1.0, 0.55, 0.5), mood_anger * 0.7)
@@ -637,29 +704,39 @@ func draw_ui(c: CanvasItem) -> void:
 	var h := 48.0
 	var font := ThemeDB.fallback_font
 	if vision_cone != null:
-		var cone_angle: float
-		match dir:
-			0: cone_angle = PI / 2.0
-			1: cone_angle = -PI / 2.0
-			2: cone_angle = 0.0 if facing > 0 else PI
-			_: cone_angle = PI / 2.0
-		var depth := 45.0 if id == "villager_elder" else 70.0
-		var spread := 20.0 if id == "villager_elder" else 30.0
-		var col_fill := Color(0.55, 0.35, 0.9, 0.38) if id == "villager_elder" else Color(1.0, 0.8, 0.2, 0.45)
-		var col_line := Color(0.55, 0.35, 0.9, 0.75) if id == "villager_elder" else Color(1.0, 0.85, 0.15, 0.85)
-		var p2 := Vector2(depth, -spread).rotated(cone_angle)
-		var p3 := Vector2(depth, spread).rotated(cone_angle)
-		c.draw_colored_polygon(PackedVector2Array([Vector2.ZERO, p2, p3]), col_fill)
-		c.draw_line(Vector2.ZERO, p2, col_line, 1.0)
-		c.draw_line(Vector2.ZERO, p3, col_line, 1.0)
-		c.draw_line(p2, p3, col_line, 1.0)
+		var r := _vision_radius()
+		var is_elder := id == "villager_elder"
+		var base_hue := Color(0.55, 0.35, 0.9) if is_elder else Color(1.0, 0.85, 0.15)
+		# Preenchimento gradiente radial (3 anéis, mais opaco no centro)
+		c.draw_circle(Vector2.ZERO, r * 0.3, Color(base_hue.r, base_hue.g, base_hue.b, 0.10))
+		c.draw_circle(Vector2.ZERO, r * 0.6, Color(base_hue.r, base_hue.g, base_hue.b, 0.06))
+		c.draw_circle(Vector2.ZERO, r, Color(base_hue.r, base_hue.g, base_hue.b, 0.03))
+		# Borda pontilhada
+		var seg := 24
+		for i2 in seg:
+			if i2 % 2 == 0:
+				var a0 := TAU * i2 / float(seg)
+				var a1 := TAU * (i2 + 1) / float(seg)
+				c.draw_arc(Vector2.ZERO, r, a0, a1, 6, Color(base_hue.r, base_hue.g, base_hue.b, 0.45), 1.0)
+		# Varredura tipo radar
+		var sweep_angle := fmod(t * 1.5, TAU)
+		var sweep_pts: PackedVector2Array = [Vector2.ZERO]
+		var sweep_cols: PackedColorArray = [Color(base_hue.r, base_hue.g, base_hue.b, 0.18)]
+		var sweep_arc := PI * 0.4
+		var sweep_segs := 10
+		for i3 in sweep_segs + 1:
+			var a := sweep_angle - sweep_arc + sweep_arc * 2.0 * i3 / float(sweep_segs)
+			sweep_pts.append(Vector2(cos(a), sin(a)) * r)
+			var fade: float = 1.0 - abs(i3 / float(sweep_segs) - 0.5) * 2.0
+			sweep_cols.append(Color(base_hue.r, base_hue.g, base_hue.b, 0.12 * fade))
+		c.draw_polygon(sweep_pts, sweep_cols)
 	if world and world.show_names and not decor and str(def.get("name", "")) != "":
 		var nm := str(def.name)
 		var tw := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
 		c.draw_rect(Rect2(-tw / 2.0 - 3, 4, tw + 6, 13), Color(0.04, 0.05, 0.08, 0.88))
 		c.draw_rect(Rect2(-tw / 2.0 - 3, 4, tw + 6, 13), Color(1.0, 0.85, 0.35, 0.5), false, 1.0)
 		c.draw_string(font, Vector2(-tw / 2.0, 14), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 1, 1, 1))
-	if suspicion >= SUSPICION_ALERT:
+	if suspicion >= 1.0:
 		var bar_w := 22.0
 		var bar_h := 3.0
 		var bar_x := -bar_w / 2.0

@@ -28,9 +28,9 @@ func _ready() -> void:
 	ob.add_item("1280x720", 0)
 	ob.add_item("1920x1080", 1)
 	ob.add_item("Tela cheia", 2)
-	ob.select(int(Game.settings.resolution))
+	ob.select(int(Game.settings.display_mode))
 	ob.item_selected.connect(func(i):
-		Game.settings.resolution = i
+		Game.settings.display_mode = i
 		Game.apply_settings())
 	row.add_child(ob)
 	box.add_child(row)
